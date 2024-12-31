@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     # MongoDB settings
     MONGO_URI: str
     MONGO_DATABASE: str
+    OPENAI_API_KEY: str 
+    PINECONE_API_KEY: str
 
 
 # Khởi tạo settings

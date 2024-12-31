@@ -1,7 +1,10 @@
+import os
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+
+from app.api.services.chatService import createIndexesFromFiles
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -14,22 +17,20 @@ def read_items() -> Any:
     
     return "OK"
 
-
-@router.post("/{id}", response_model=str)
-def createReplyMsg() -> Any:
-    """
-    Get item by ID.
-    """
-    
-    return "OK"
-
-
 @router.post("/create-index", response_model=str)
-def createLocalIndex() -> Any:
+async def createLocalIndex() -> Any:
     """
     Create new item.
     """
-    
+    print("CC")
+    relative_folder: str = os.path.join(os.pardir, os.pardir, "docs")  # Back 3 lần và vào thư mục "docs"
+    exact_folder: str = os.path.abspath(os.path.join(os.path.dirname(__file__), relative_folder))
+    print("Exact folder: ", exact_folder)
+
+    print("Exact folder: ", exact_folder)
+    web_url: str = "https://vnexpress.net/than-thanh-hoa-ielts-4627600.html?utm_source=facebook&utm_medium=fanpage_VnE&utm_campaign=phuonguyen&fbclid=IwAR342qeRaOfJRwnJUl145GW3ojO2-S2XGcHa1XvxSqMTc6mKplJE2siI_qE"
+
+    await createIndexesFromFiles(exact_folder, [web_url])
     return "ok"
 
 
@@ -40,6 +41,18 @@ def createNewChat() -> Any:
     """
     
     return "ok"
+
+
+@router.post("/{id}", response_model=str)
+def createReplyMsg() -> Any:
+    """
+    Get item by ID.
+    """
+    
+    return "OKg"
+
+
+
 
 
 # @router.delete("/{id}")
