@@ -14,12 +14,12 @@ class PyObjectId(ObjectId):
         return ObjectId(v)
     
     @classmethod
-    def __modify_schema__(cls, field_schema):
+    def __get_pydantic_json_schema__(cls, field_schema):
         field_schema.update(type="string")
 
 class MongooseModel(BaseModel):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id") # map _id field from mongodb    
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
         arbitrary_types_allowed = True
         json_encoders = {ObjectId: str}
