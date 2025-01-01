@@ -16,8 +16,8 @@ class ChatUserDto(BaseModel):
     
 class CreateIndexDto(BaseModel):
     message: str
-    total_docs: int
-    total_chunks: int
+    index_name: str
+    index_url: str
 
 class LLMResponseDto(BaseModel):
     reply: str

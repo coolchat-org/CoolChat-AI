@@ -1,7 +1,10 @@
+import hashlib
 import os
 import shutil
 import tempfile
+import time
 from typing import Any, List, Tuple, Type
+from uuid import uuid4
 from charset_normalizer import detect
 from fastapi import HTTPException, status
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
@@ -9,12 +12,14 @@ from langchain_core.document_loaders.base import BaseLoader
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
+# from langchain_community.vectorstores import FAISS
 from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
 from app.dtos.chatUserDto import CreateIndexDto
 from app.utils.crawlsite import crawl_sites
 from app.core.config import settings
+from pinecone import Pinecone, ServerlessSpec
+from langchain_pinecone import PineconeVectorStore
 
 
 # Helper function use snake_case
@@ -140,15 +145,43 @@ def set_batch_and_splitter(length: int) -> Tuple[int, RecursiveCharacterTextSpli
 
     return batch_size, text_splitter
 
+def generate_index_name(organization_id: str, prefix: str = "org-index") -> str:
+    """
+    Generate a unique Pinecone index name using SHA-256 hash of the organization_id.
+
+    Args:
+        organization_id (str): The organization ID to hash.
+        prefix (str): Optional prefix for the index name (default is 'org_index').
+
+    Returns:
+        str: A unique index name.
+    """
+    # Hash the organization_id using SHA-256
+    hash_object = hashlib.sha256(organization_id.encode())
+    hashed_id = hash_object.hexdigest()  # Get the hexadecimal representation of the hash
+
+    # Combine prefix and hashed ID to create the index name
+    index_name = f"{prefix}-{hashed_id[:16]}"  # Use the first 16 characters of the hash for brevity
+    return index_name
+
 
 # main function use camelCase
-async def createIndexesFromFiles(folder: str, websites: List[str]):
+async def createIndexesFromFiles(folder: str, websites: List[str], organization_id: str = "1234567"):
     try:
+        # --- Check index exists
+        pc = Pinecone(api_key=settings.PINECONE_API_KEY)
+        index_name = generate_index_name(organization_id=organization_id)
+
+        existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
+        if index_name in existing_indexes:
+            raise Exception(f"Index '{index_name}' already exists.")
+        
+        # --- LOGIC
         pdfFiles: List[Any] = filter_files_by_extensions(folder_path=folder, extensions=[".pdf"])
         docFiles: List[Any] = filter_files_by_extensions(folder_path=folder, extensions=[".docx"])
         txtFiles: List[Any] = filter_files_by_extensions(folder_path=folder, extensions=[".txt"])
 
-        if len(pdfFiles) == 0 and len(docFiles.length) == 0 and len(txtFiles.length) == 0:
+        if len(pdfFiles) == 0 and len(docFiles) == 0 and len(txtFiles) == 0:
             raise ValueError("No valid files (PDF, Word, or TXT) found in the folder.")
         else:
             print("Found pdf files: ", len(pdfFiles))
@@ -156,53 +189,59 @@ async def createIndexesFromFiles(folder: str, websites: List[str]):
             print("Found txt files: ", len(txtFiles))
         
         normalDocs: List[Document] = await load_files_by_type(pdfFiles + docFiles + txtFiles)
-        # Crawl websites
         webDocs: List[Document] = await crawl_sites(websites=websites)
         allDocs: List[Document] = normalDocs + webDocs
 
         print(f'Total documents loaded: {len(allDocs)}')
 
         batch_size, text_splitter = set_batch_and_splitter(len(allDocs))
-        batched_splits = []
-        # batch processing to make it faster
-        for i in tqdm(range(0, len(allDocs), batch_size), desc="Processing batches", unit="batch"):
-            batch = allDocs[i:i + batch_size]
-            batch_splits = [text_splitter.split_documents([doc]) for doc in batch]
-
-            # Gộp kết quả vào danh sách tổng
-            batched_splits.extend(doc for split in batch_splits for doc in split)
-        
-        print(f"Total chunks created: {len(batched_splits)}")
-
         embedder = OpenAIEmbeddings(
-            model="text-embedding-3-large",
+            model="text-embedding-3-small",
             api_key=settings.OPENAI_API_KEY
         )
-        vector_store = FAISS.from_documents(batched_splits, embedder)
-
-        # Lưu trữ FAISS vào thư mục
-        relative_folder: str = os.path.join(os.pardir, os.pardir, "indexes")
-        save_dir: str = os.path.abspath(os.path.join(os.path.dirname(__file__), relative_folder))
-        print(f"Saving index to: {save_dir}")
-        vector_store.save_local(save_dir)
-        print("Index saved successfully.")
         
+        pc.create_index(
+            name=index_name,
+            dimension=1536,
+            metric="cosine",
+            spec=ServerlessSpec(cloud="aws", region="us-east-1"),
+        )
+        while not pc.describe_index(index_name).status["ready"]:
+            time.sleep(1)
+
+        index = pc.Index(index_name)
+        index_url = pc.describe_index(index_name)["host"]
+
+        print("Processing and indexing documents...")
+        for i in tqdm(range(0, len(allDocs), batch_size), desc="Processing and Indexing batches", unit="batch"):
+            batch = allDocs[i:i + batch_size]
+            batch_splits = [doc for doc in text_splitter.split_documents(batch)]
+            vectors = [
+                (
+                    doc.metadata.get("id", str(uuid4())),
+                    embedder.embed_query(doc.page_content),
+                    {"content": doc.page_content, "source": doc.metadata.get("source")}
+                )
+                for doc in batch_splits
+            ]
+            index.upsert(vectors)
+            
+
         return CreateIndexDto(
             message="Index creation completed successfully.",
-            total_docs=len(allDocs),
-            total_chunks=len(batched_splits)
+            index_name=index_name,
+            index_url=index_url,
         )
 
     except ValueError as ve:
-        # Trả về lỗi nếu không có tài liệu hợp lệ
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(ve)
         )
     except Exception as e:
-        # Trả về lỗi chung nếu xảy ra lỗi trong quá trình xử lý
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An unexpected error occurred: {str(e)}"
-        ) 
+        )
+
 
