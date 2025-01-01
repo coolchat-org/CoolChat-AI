@@ -13,3 +13,8 @@ class ChatUserDto(BaseModel):
         if not v.strip():
             raise ValueError("new_message must not be empty")
         return v
+    
+class CreateIndexDto(BaseModel):
+    message: str
+    total_docs: int
+    total_chunks: int

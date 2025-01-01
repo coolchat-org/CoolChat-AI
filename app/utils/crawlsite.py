@@ -38,19 +38,25 @@ async def crawl_sites(websites: List[str]) -> List[Document]:
 
             # extract content from h1 to the rest of the body
             h1_encountered: bool = False
-            content: str = ""
+            content: List[str] = []
             for element in soup.body.descendants:
                 if element.name == "h1":
                     h1_encountered = True
                 if h1_encountered and element.name in meaningful_tags:
                     text = element.get_text(strip=True)
-                    if element.name == "a":
-                        text = text + " " + element['href']
+                    # Handle anchor tags (add href)
+                    if element.name == "a" and element.get("href"):
+                        href = element["href"]
+                        text = f"{text} ({href})"
+
                     if text:
-                        content = content + " " + text
+                        # Add a space between elements
+                        content.append(text)
+ 
             # Create a LangChain Document object
-            if content:
-                documents.append(Document(page_content=content, metadata={"source": url}))
+            full_content = " ".join(content).replace("  ", " ")  # Ensure proper spacing
+            if full_content:
+                documents.append(Document(page_content=full_content, metadata={"source": url}))
 
         except Exception as e:
             print(f"Error while processing {url}: {e}")
