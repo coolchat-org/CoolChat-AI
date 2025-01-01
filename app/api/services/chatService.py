@@ -1,8 +1,8 @@
 import os
-from re import split
 import shutil
 import tempfile
-from typing import Any, List, Type
+from typing import Any, List, Tuple, Type
+from fastapi import HTTPException, status
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain_core.document_loaders.base import BaseLoader
 from langchain_core.documents import Document
@@ -11,7 +11,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
-
+from app.dtos.chatUserDto import CreateIndexDto
 from app.utils.crawlsite import crawl_sites
 from app.core.config import settings
 
@@ -46,11 +46,9 @@ def get_loader(file: str) -> Type[BaseLoader]:
         ".pdf": PyPDFLoader,
         ".txt": TextLoader,
     }
-
     # Get file extension
     _, ext = os.path.splitext(file)
     ext = ext.lower()
-
     if ext in loader_mapping:
         return loader_mapping[ext]
 
@@ -103,6 +101,35 @@ async def load_files_by_type(files: List[str]) -> List[Document]:
     print(f"Loaded {len(all_documents)} documents.")
     return all_documents
 
+def set_batch_and_splitter(length: int) -> Tuple[int, RecursiveCharacterTextSplitter]:
+    """
+    Return the proper batch and TextSplitter with right chunk size & overlap
+    """
+    batch_size = 10
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=50,
+        length_function=len,
+        is_separator_regex=False)
+    if length > 1000:
+        batch_size = 50
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=4000,          # Tăng chunk_size để giảm số lượng đoạn
+            chunk_overlap=300,        # Tăng chunk_overlap nếu cần ngữ cảnh rộng hơn
+            length_function=len,
+            is_separator_regex=False
+        )
+    elif length > 500:
+        batch_size = 20
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=2000,          # Tăng chunk_size để giảm số lượng đoạn
+            chunk_overlap=100,        # Tăng chunk_overlap nếu cần ngữ cảnh rộng hơn
+            length_function=len,
+            is_separator_regex=False
+        )
+
+    return batch_size, text_splitter
+
 
 # main function use camelCase
 async def createIndexesFromFiles(folder: str, websites: List[str]):
@@ -119,22 +146,13 @@ async def createIndexesFromFiles(folder: str, websites: List[str]):
             print("Found txt files: ", len(txtFiles))
         
         normalDocs: List[Document] = await load_files_by_type(pdfFiles + docFiles + txtFiles)
-        # docDocs: List[Document] = await load_files_by_type(docFiles)
-        # txtDocs: List[Document] = await load_files_by_type(docFiles)
         # Crawl websites
         webDocs: List[Document] = await crawl_sites(websites=websites)
         allDocs: List[Document] = normalDocs + webDocs
 
         print(f'Total documents loaded: {len(allDocs)}')
 
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=50,
-            length_function=len,
-            is_separator_regex=False
-        )
-        
-        batch_size: int = 10
+        batch_size, text_splitter = set_batch_and_splitter(len(allDocs))
         batched_splits = []
         # batch processing to make it faster
         for i in tqdm(range(0, len(allDocs), batch_size), desc="Processing batches", unit="batch"):
@@ -157,8 +175,24 @@ async def createIndexesFromFiles(folder: str, websites: List[str]):
         save_dir: str = os.path.abspath(os.path.join(os.path.dirname(__file__), relative_folder))
         print(f"Saving index to: {save_dir}")
         vector_store.save_local(save_dir)
-
         print("Index saved successfully.")
+        
+        return CreateIndexDto(
+            message="Index creation completed successfully.",
+            total_docs=len(allDocs),
+            total_chunks=len(batched_splits)
+        )
 
+    except ValueError as ve:
+        # Trả về lỗi nếu không có tài liệu hợp lệ
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
     except Exception as e:
-        print("Error create indexes: ", e)
+        # Trả về lỗi chung nếu xảy ra lỗi trong quá trình xử lý
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        ) 
+

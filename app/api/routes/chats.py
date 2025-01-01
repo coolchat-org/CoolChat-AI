@@ -1,10 +1,8 @@
 import os
-import uuid
 from typing import Any
-
-from fastapi import APIRouter, HTTPException
-
+from fastapi import APIRouter, HTTPException, status
 from app.api.services.chatService import createIndexesFromFiles
+from app.dtos.chatUserDto import CreateIndexDto
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -17,21 +15,31 @@ def read_items() -> Any:
     
     return "OK"
 
-@router.post("/create-index", response_model=str)
+@router.post("/create-index", response_model=CreateIndexDto)
 async def createLocalIndex() -> Any:
     """
     Create new item.
     """
-    print("CC")
-    relative_folder: str = os.path.join(os.pardir, os.pardir, "docs")  # Back 3 lần và vào thư mục "docs"
-    exact_folder: str = os.path.abspath(os.path.join(os.path.dirname(__file__), relative_folder))
-    print("Exact folder: ", exact_folder)
+    try:
+        # demo folder path
+        relative_folder: str = os.path.join(os.pardir, os.pardir, "docs")  # Lùi 2 cấp vào thư mục "docs"
+        exact_folder: str = os.path.abspath(os.path.join(os.path.dirname(__file__), relative_folder))
+        print("Exact folder: ", exact_folder)
 
-    print("Exact folder: ", exact_folder)
-    web_url: str = "https://vnexpress.net/than-thanh-hoa-ielts-4627600.html?utm_source=facebook&utm_medium=fanpage_VnE&utm_campaign=phuonguyen&fbclid=IwAR342qeRaOfJRwnJUl145GW3ojO2-S2XGcHa1XvxSqMTc6mKplJE2siI_qE"
+        # demo site url
+        web_url: str = "https://vnexpress.net/than-thanh-hoa-ielts-4627600.html?utm_source=facebook&utm_medium=fanpage_VnE&utm_campaign=phuonguyen&fbclid=IwAR342qeRaOfJRwnJUl145GW3ojO2-S2XGcHa1XvxSqMTc6mKplJE2siI_qE"
+        
+        result = await createIndexesFromFiles(exact_folder, [web_url])
+        return result
 
-    await createIndexesFromFiles(exact_folder, [web_url])
-    return "ok"
+    except HTTPException as http_exc:
+        raise http_exc
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
 
 
 @router.put("/new-chat", response_model=str)
