@@ -378,6 +378,7 @@ dependencies = [
     { name = "langchain-pinecone" },
     { name = "motor" },
     { name = "pinecone-client" },
+    { name = "pinecone-notebooks" },
     { name = "pydantic-settings" },
     { name = "pypdf" },
     { name = "sentry-sdk" },
@@ -398,6 +399,7 @@ requires-dist = [
     { name = "langchain-pinecone", specifier = ">=0.2.0" },
     { name = "motor", specifier = ">=3.6.0" },
     { name = "pinecone-client", specifier = ">=5.0.1" },
+    { name = "pinecone-notebooks", specifier = ">=0.1.1" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
     { name = "pypdf", specifier = ">=5.1.0" },
     { name = "sentry-sdk", specifier = ">=2.19.2" },
@@ -1040,6 +1042,14 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/98/a4/739fe0a4a173658d541206ec7fdb0cc4c9ddc364de216af668b988bf0868/pinecone_client-5.0.1.tar.gz", hash = "sha256:11c33ff5d1c38a6ce69e69fe532c0f22f312fb28d761bb30b3767816d3181d64", size = 122207 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/55/d0/c64336b8f76e63296d04b885c545c0872ff070e6b2bc725dd0ff3ae681dc/pinecone_client-5.0.1-py3-none-any.whl", hash = "sha256:c8f7835e1045ba84e295f217a8e85573ffb80b41501bbc1af6d92c9631c567a7", size = 244818 },
+]
+
+[[package]]
+name = "pinecone-notebooks"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2b/83/3d0eff668327fbfc844037790351e01260c697f70574d7bcf6167e6f3e4c/pinecone_notebooks-0.1.1-py3-none-any.whl", hash = "sha256:6f5eb0b163fe7d50e3ef61d4fe2e0a6d5c15b762214c5f756979adf7a44f7762", size = 7294 },
 ]
 
 [[package]]
