@@ -18,3 +18,8 @@ class CreateIndexDto(BaseModel):
     message: str
     total_docs: int
     total_chunks: int
+
+class LLMResponseDto(BaseModel):
+    reply: str
+    context: Any
+    message: str
