@@ -1,7 +1,8 @@
 from typing import List, Tuple, Optional
+from fastapi import HTTPException, status
 from pydantic import field_validator
-
-from app.models.models import MongooseModel
+from motor.motor_asyncio import AsyncIOMotorCollection
+from app.models.models import MongooseModel, PyObjectId
 
 class ChatModel(MongooseModel):
     memory: Optional[str] = None # it is optional
@@ -12,3 +13,18 @@ class ChatModel(MongooseModel):
         if not isinstance(value, tuple) or len(value) != 2:
             raise ValueError("Each conversation must be a tuple of exactly two strings.")
         return value
+    
+    @classmethod
+    async def find_by_id(cls, chat_id: str, collection: AsyncIOMotorCollection) -> Optional["ChatModel"]:
+        """Find a chat document by ID using Motor."""
+        chat = await collection.find_one({"_id": PyObjectId(chat_id)})
+        if chat:
+            return cls(**chat)
+        return None
+
+    async def save(self, collection: AsyncIOMotorCollection) -> "ChatModel":
+        """Save the updated chat document using Motor."""
+        result = await collection.replace_one({"_id": self.id}, self.model_dump(by_alias=True))
+        if result.modified_count == 0:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save the updated chat.")
+        return self
