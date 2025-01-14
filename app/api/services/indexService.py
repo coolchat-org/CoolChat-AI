@@ -166,7 +166,7 @@ def generate_index_name(organization_id: str, prefix: str = "org-index") -> str:
 
 
 # main function use camelCase
-async def createIndexesFromFiles(folder: str, websites: List[str], organization_id: str = "1234567"):
+async def createIndexesFromFiles(folder: str, websites: List[str], organization_id: str = "12345xoz"):
     try:
         # --- Check index exists
         pc = Pinecone(api_key=settings.PINECONE_API_KEY)
@@ -210,22 +210,14 @@ async def createIndexesFromFiles(folder: str, websites: List[str], organization_
             time.sleep(1)
 
         index = pc.Index(index_name)
-        index_url = pc.describe_index(index_name)["host"]
-
         print("Processing and indexing documents...")
-        for i in tqdm(range(0, len(allDocs), batch_size), desc="Processing and Indexing batches", unit="batch"):
+        vector_store = PineconeVectorStore(index=index, embedding=embedder)
+        for i in tqdm(range(0, len(allDocs), batch_size), desc="Processing batches", unit="batch"):
             batch = allDocs[i:i + batch_size]
-            batch_splits = [doc for doc in text_splitter.split_documents(batch)]
-            vectors = [
-                (
-                    doc.metadata.get("id", str(uuid4())),
-                    embedder.embed_query(doc.page_content),
-                    {"content": doc.page_content, "source": doc.metadata.get("source")}
-                )
-                for doc in batch_splits
-            ]
-            index.upsert(vectors)
-            
+            batch_splits = text_splitter.split_documents(batch)
+            await vector_store.aadd_documents(batch_splits)  # Sử dụng phương thức bất đồng bộ
+        
+        index_url = pc.describe_index(index_name)["host"]
 
         return CreateIndexDto(
             message="Index creation completed successfully.",

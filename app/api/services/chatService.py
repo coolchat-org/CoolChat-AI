@@ -18,43 +18,75 @@ from app.dtos.chatUserDto import LLMResponseDto
 from app.models.chatModel import ChatModel
 from app.models.models import PyObjectId
 from pinecone import Pinecone
+from functools import lru_cache
 
 # BaseMessage[] to work with chat history
 chat_history: List[BaseMessage] = []
 
-def response_from_LLM(index_path: str, query: str):
-    retrieval_qa_chat_prompt: ChatPromptTemplate = pull("davidnguyen2212/retrievala-qa-chat-for-cool-chat")
-    rephrase_prompt: ChatPromptTemplate = pull("langchain-ai/chat-langchain-rephrase")
 
-    model = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, api_key=settings.OPENAI_API_KEY, verbose=True)
-    embedder = OpenAIEmbeddings(model="text-embedding-3-small", api_key=settings.OPENAI_API_KEY)
-    question_answer_chain = create_stuff_documents_chain(llm=model, prompt=retrieval_qa_chat_prompt)
+@lru_cache(maxsize=1)
+def get_model():
+    return ChatOpenAI(model="gpt-4o-mini", temperature=0.2, api_key=settings.OPENAI_API_KEY, streaming=True)
 
-    # vectorStore: FAISS = FAISS.load_local(folder_path=index_path, embeddings=embedder, allow_dangerous_deserialization=True)
-    pc = Pinecone(api_key=settings.PINECONE_API_KEY)
-    index = pc.Index(host="https://org-index-8bb0cf6eb9b17d0f-oei5fcs.svc.aped-4627-b74a.pinecone.io")
-    vectorStore = PineconeVectorStore(index=index, embedding=embedder)
-    retriever = vectorStore.as_retriever()
-    history_aware_retriever = create_history_aware_retriever(
-        llm=model, retriever=retriever, prompt=rephrase_prompt
+@lru_cache(maxsize=1)
+def get_embedder():
+    return OpenAIEmbeddings(model="text-embedding-3-small", api_key=settings.OPENAI_API_KEY)
+
+@lru_cache(maxsize=1)
+def get_prompts():
+    return (
+        pull("davidnguyen2212/retrievala-qa-chat-for-cool-chat"),
+        pull("langchain-ai/chat-langchain-rephrase"),
     )
+
+@lru_cache(maxsize=1)
+def get_chain():
+    retrieval_qa_chat_prompt, _ = get_prompts()
+    model = get_model()
+    return create_stuff_documents_chain(llm=model, prompt=retrieval_qa_chat_prompt)
+
+@lru_cache(maxsize=1)
+def get_retriever():
+    pc = Pinecone(api_key=settings.PINECONE_API_KEY)
+    index = pc.Index(host="org-index-7812b41e26a080f5-oei5fcs.svc.aped-4627-b74a.pinecone.io")
+    vectorStore = PineconeVectorStore(index=index, embedding=get_embedder())
+    return vectorStore.as_retriever(search_kwargs={'k': 1})  # Giảm k xuống 1
+
+@lru_cache(maxsize=1)
+def get_history_aware_retriever():
+    retriever = get_retriever()
+    _, rephrase_prompt = get_prompts()
+    return create_history_aware_retriever(
+        llm=get_model(),
+        retriever=retriever,
+        prompt=rephrase_prompt
+    )
+
+
+
+async def response_from_LLM(query: str, index_path: str = None):
+    question_answer_chain = get_chain()
+    history_aware_retriever = get_history_aware_retriever()
 
     ragChain = create_retrieval_chain(
         retriever=history_aware_retriever, 
         combine_docs_chain=question_answer_chain
         )
-    result = ragChain.invoke(input={"input": query, "chat_history": chat_history})
-    if result:
-        chat_history.append(HumanMessage(content=query))
-        chat_history.append(AIMessage(result["answer"]))
+    # result = ragChain.invoke(input={"input": query, "chat_history": chat_history})
+    # if result:
+    #     chat_history.append(HumanMessage(content=query))
+    #     chat_history.append(AIMessage(result["answer"]))
 
-    print(result)
-
-    return LLMResponseDto(
-        reply=result["answer"],
-        context=result["context"],
-        message="Response successfully"
-    )
+    # return LLMResponseDto(
+    #     reply=result["answer"],
+    #     # context=result["context"],
+    #     context=None,
+    #     message="Response successfully"
+    # )
+    async for chunk in ragChain.astream(input={"input": query, "chat_history": chat_history}):
+        # content = chunk.replace("\n", "<br>")
+        if chunk.get('answer', None) is not None:
+            yield f"{chunk['answer']}"
 
 async def updateConversation(chatId: PyObjectId, userData: str, llmData: str):
     chat = await ChatModel.find_by_id(chatId, db["chats"])
