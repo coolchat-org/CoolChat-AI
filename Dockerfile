@@ -32,4 +32,4 @@ RUN uv sync
 EXPOSE 8000
 
 # Lệnh khởi động ứng dụng
-CMD ["uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD [".venv/bin/uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8000"]
