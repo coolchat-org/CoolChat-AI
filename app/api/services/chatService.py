@@ -15,7 +15,7 @@ from app.models.chatModel import ChatModel
 from app.core.db import mongo_connection
 from pinecone import Pinecone
 from functools import lru_cache
-from transformers import AutoTokenizer, T5ForConditionalGeneration
+# from transformers import AutoTokenizer, T5ForConditionalGeneration
 
 # Tải model/tokenizer tại cấp module
 MODEL_PATH = "CreatorPhan/ViSummary"
@@ -130,30 +130,30 @@ async def save_chat_history_and_memory(chat: ChatModel, query: str, response: st
     updated_chat = await chat.save(mongo_connection.db["chats"])
     return updated_chat
 
-def load_model_and_tokenizer():
-    """
-    Tải mô hình và tokenizer chỉ khi cần thiết.
-    """
-    global tokenizer, model
-    if tokenizer is None or model is None:
-        print("Load summarization model...")
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-        model = T5ForConditionalGeneration.from_pretrained(MODEL_PATH).to('cpu')
-    return tokenizer, model
+# def load_model_and_tokenizer():
+#     """
+#     Tải mô hình và tokenizer chỉ khi cần thiết.
+#     """
+#     global tokenizer, model
+#     if tokenizer is None or model is None:
+#         print("Load summarization model...")
+#         tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+#         model = T5ForConditionalGeneration.from_pretrained(MODEL_PATH).to('cpu')
+#     return tokenizer, model
 
-def tokenize_and_summarize(old_context, query, response, max_token: int = 10024) -> Tuple[str, bool]:
-    new_context = f"{old_context + " " if old_context != "" else ""}Customer: {query}, AI: {response}"
-    token_count = len(new_context.split())
+# def tokenize_and_summarize(old_context, query, response, max_token: int = 10024) -> Tuple[str, bool]:
+#     new_context = f"{old_context + " " if old_context != "" else ""}Customer: {query}, AI: {response}"
+#     token_count = len(new_context.split())
     
-    if token_count >= max_token:
-        tokenizer, model = load_model_and_tokenizer()
-        tokens = tokenizer(f"Tóm tắt văn bản sau: {new_context}", return_tensors='pt').input_ids
-        output = model.generate(tokens.to('cpu'), max_new_tokens=max_token // 2)[0]
-        predict = tokenizer.decode(output, skip_special_tokens=True)
+#     if token_count >= max_token:
+#         tokenizer, model = load_model_and_tokenizer()
+#         tokens = tokenizer(f"Tóm tắt văn bản sau: {new_context}", return_tensors='pt').input_ids
+#         output = model.generate(tokens.to('cpu'), max_new_tokens=max_token // 2)[0]
+#         predict = tokenizer.decode(output, skip_special_tokens=True)
 
-        return predict, True
+#         return predict, True
 
-    return "", False
+#     return "", False
 
 def tokenize_and_summarize_openai(old_context, query, response, max_token: int = 2048) -> Tuple[str, bool]:
     new_context = f"{old_context + " " if old_context != "" else ""}Customer: {query}, AI: {response}"
