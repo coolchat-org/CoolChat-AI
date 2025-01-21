@@ -1,12 +1,14 @@
 import hashlib
 import os
-import shutil
 import tempfile
+import shutil
+from pathlib import Path
+import subprocess
 import time
 from typing import Any, List, Tuple, Type
 from uuid import uuid4
 from charset_normalizer import detect
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain_core.document_loaders.base import BaseLoader
 from langchain_core.documents import Document
@@ -20,6 +22,7 @@ from app.utils.crawlsite import crawl_sites
 from app.core.config import settings
 from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
+import asyncio
 
 
 # Helper function use snake_case
@@ -30,37 +33,122 @@ def filter_files_by_extensions(folder_path: str, extensions: list[str]) -> list[
         if any(file.endswith(ext) for ext in extensions)
     ]
 
-async def convert_doc_to_docx(doc_file: str) -> str:
+# async def convert_doc_to_docx(doc_file: UploadFile) -> str:
+#     """
+#     Convert a .doc file to .docx format.
+    
+#     Args:
+#         doc_file (UploadFile): The uploaded .doc file.
+        
+#     Returns:
+#         str: Path to the converted .docx file.
+#     """
+#     try:
+#         # Save the uploaded .doc file to a temporary file
+#         with tempfile.NamedTemporaryFile(delete=False, suffix=".doc") as temp_doc:
+#             content = await doc_file.read()
+#             temp_doc.write(content)
+#             temp_doc_path = temp_doc.name
+
+#         # Create temporary directory for output
+#         with tempfile.TemporaryDirectory() as temp_dir:
+#             # Use LibreOffice for the conversion
+#             command = [
+#                 "soffice",
+#                 "--headless",
+#                 "--convert-to", "docx",
+#                 "--outdir", f'"{temp_dir}"',
+#                 f'"{temp_doc_path}"'
+#             ]
+
+#             print(temp_dir)
+#             print(temp_doc_path)
+
+#             # Run the conversion command
+#             process = await asyncio.create_subprocess_exec(
+#                 *command,
+#                 stdout=asyncio.subprocess.PIPE,
+#                 stderr=asyncio.subprocess.PIPE
+#             )
+#             stdout, stderr = await process.communicate()
+
+#             if process.returncode != 0:
+#                 raise RuntimeError(f"Conversion failed: {stderr.decode()}")
+
+#             # Get the output file path
+#             output_filename = Path(temp_doc_path).stem + ".docx"
+#             output_path = os.path.join(temp_dir, output_filename)
+#             print(output_filename)
+#             print(output_path)
+            
+#             # Move to a new temporary location that won't be deleted
+#             final_path = tempfile.mktemp(suffix=".docx")
+#             shutil.move(output_path, final_path)
+
+#         # Clean up the original .doc file
+#         Path(temp_doc_path).unlink(missing_ok=True)
+        
+#         return final_path
+
+#     except Exception as e:
+#         raise RuntimeError(f"Failed to convert {doc_file.filename} to .docx: {e}")
+
+from fastapi import UploadFile
+import os
+import tempfile
+import shutil
+import subprocess
+
+async def convert_doc_to_docx(doc_file: UploadFile) -> str:
     """
-    Convert a .doc file to .docx format (stub function - implement conversion logic).
+    Convert a .doc file to .docx format.
+    
+    Args:
+        doc_file (UploadFile): The uploaded .doc file.
+        
+    Returns:
+        str: Path to the converted .docx file.
     """
-    # Placeholder implementation: requires `libreoffice` or `unoconv` for actual conversion
     try:
+        # Save the uploaded .doc file to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".doc") as temp_doc:
+            content = await doc_file.read()
+            temp_doc.write(content)
+            temp_doc_path = temp_doc.name
+
+        # Create output path for the .docx file
         docx_file = tempfile.mktemp(suffix=".docx")
-        shutil.copy(doc_file, docx_file)  # Simulate conversion by copying
+
+        # Use LibreOffice to convert the file
+        command = [
+            "soffice",
+            "--headless",
+            "--convert-to",
+            "docx",
+            "--outdir",
+            os.path.dirname(docx_file),
+            temp_doc_path,
+        ]
+        process = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        if process.returncode != 0:
+            raise RuntimeError(f"LibreOffice conversion failed: {process.stderr.decode()}")
+
+        # Ensure the output file exists
+        converted_file_path = temp_doc_path.replace(".doc", ".docx")
+        if not os.path.exists(converted_file_path):
+            raise FileNotFoundError(f"Converted file not found: {converted_file_path}")
+        
+        shutil.move(converted_file_path, docx_file)  # Move to final path
         return docx_file
+
     except Exception as e:
-        raise RuntimeError(f"Failed to convert {doc_file} to .docx: {e}")
+        raise RuntimeError(f"Error converting file: {e}")
 
-def get_loader(file: str) -> Type[BaseLoader]:
-    """
-    Determine the appropriate loader class for a given file type.
-    """
-    loader_mapping = {
-        ".docx": Docx2txtLoader,
-        ".doc": Docx2txtLoader,
-        ".pdf": PyPDFLoader,
-        ".txt": TextLoader,
-    }
-    # Get file extension
-    _, ext = os.path.splitext(file)
-    ext = ext.lower()
-    if ext in loader_mapping:
-        return loader_mapping[ext]
 
-    raise ValueError(f"No loader available for file type: {ext}")
 
-def detect_file_encoding(file: str) -> str:
+
+def detect_file_encoding(file: UploadFile) -> str:
     """
     Detect the encoding of a text file.
     """
@@ -68,14 +156,18 @@ def detect_file_encoding(file: str) -> str:
         result = detect(f.read())
         return result["encoding"]
     
-async def process_file(file: str) -> List[Document]:
+async def process_file(file: UploadFile) -> List[Document]:
     """
     Process a single file asynchronously.
     """
     try:
-        loader_cls = get_loader(file)
+        loader_cls = Docx2txtLoader 
+        if file.content_type == "application/pdf":
+            loader_cls = PyPDFLoader
+        elif file.content_type == "text/plain":
+            loader_cls = TextLoader
 
-        if file.endswith(".doc") and loader_cls == Docx2txtLoader:
+        if file.filename.endswith(".doc") and loader_cls == Docx2txtLoader:
             # Convert .doc to .docx
             print(f"Converting .doc to .docx for {file}...")
             docx_file = await convert_doc_to_docx(file)
@@ -83,13 +175,20 @@ async def process_file(file: str) -> List[Document]:
             documents = loader.load()
             os.remove(docx_file)  # Clean up temporary file
         else:
-            # Load the file using the specified loader
+            # Save the file temporarily for processing
+            with tempfile.NamedTemporaryFile(delete=False, suffix=file.filename.split('.')[-1]) as temp_file:
+                temp_file.write(await file.read())
+                temp_file_path = temp_file.name
+
+             # Load the file using the specified loader
             if loader_cls == TextLoader:
-                encoding = detect_file_encoding(file)
-                loader = loader_cls(file, encoding=encoding)
+                encoding = detect_file_encoding(temp_file_path)  # Ensure this function takes a file path
+                loader = loader_cls(temp_file_path, encoding=encoding)
             else:
-                loader = loader_cls(file)
+                loader = loader_cls(temp_file_path)
             documents = loader.load()
+            # Clean up temporary file
+            os.remove(temp_file_path)
 
         return documents
     
@@ -98,14 +197,12 @@ async def process_file(file: str) -> List[Document]:
         return []
     
 
-async def load_files_by_type(files: List[str]) -> List[Document]:
+async def load_files_by_type(files: List[UploadFile]) -> List[Document]:
     """
     Load files of a specific type and return a list of LangChain Document objects.
 
     Args:
-        files (List[str]): List of file paths.
-        Loader (Type[BaseLoader]): The document loader class to use.
-        file_type (str): Type of file being loaded (e.g., PDF, Word).
+        files (List[UploadFile]): List of file paths.
 
     Returns:
         List[Document]: A list of LangChain Document objects.
@@ -166,27 +263,23 @@ def generate_index_name(organization_id: str, prefix: str = "org-index") -> str:
 
 
 # main function use camelCase
-async def createIndexesFromFiles(folder: str, websites: List[str], organization_id: str = "12345xoz"):
+async def createIndexesFromFilesAndUrls(websites: List[str], pdfFiles: List[UploadFile] = None, docFiles: List[UploadFile] = None, txtFiles: List[UploadFile] = None, organization_id: str = "12345xoz"):
     try:
         # --- Check index exists
+        if len(pdfFiles) == 0 and len(docFiles) == 0 and len(txtFiles) == 0 and len(websites) == 0:
+            raise ValueError("No valid files (PDF, Word, or TXT) or websites found.")
+        else:
+            print("Found pdf files: ", len(pdfFiles))
+            print("Found doc files: ", len(docFiles))
+            print("Found txt files: ", len(txtFiles))
+            print("Found sites: ", len(websites))
+    
         pc = Pinecone(api_key=settings.PINECONE_API_KEY)
         index_name = generate_index_name(organization_id=organization_id)
 
         existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
         if index_name in existing_indexes:
             raise Exception(f"Index '{index_name}' already exists.")
-        
-        # --- LOGIC
-        pdfFiles: List[Any] = filter_files_by_extensions(folder_path=folder, extensions=[".pdf"])
-        docFiles: List[Any] = filter_files_by_extensions(folder_path=folder, extensions=[".docx"])
-        txtFiles: List[Any] = filter_files_by_extensions(folder_path=folder, extensions=[".txt"])
-
-        if len(pdfFiles) == 0 and len(docFiles) == 0 and len(txtFiles) == 0:
-            raise ValueError("No valid files (PDF, Word, or TXT) found in the folder.")
-        else:
-            print("Found pdf files: ", len(pdfFiles))
-            print("Found doc files: ", len(docFiles))
-            print("Found txt files: ", len(txtFiles))
         
         normalDocs: List[Document] = await load_files_by_type(pdfFiles + docFiles + txtFiles)
         webDocs: List[Document] = await crawl_sites(websites=websites)
