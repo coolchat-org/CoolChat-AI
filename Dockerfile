@@ -1,23 +1,34 @@
-# Base image có hỗ trợ Python và các công cụ cần thiết
-FROM ubuntu:20.04
+# Sử dụng Ubuntu làm base image
+FROM ubuntu:22.04
 
-# Cập nhật hệ thống và cài đặt LibreOffice
+# Thiết lập biến môi trường
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Ho_Chi_Minh
+# ENV PATH="$HOME/.local/bin:$PATH"
+ENV PATH="/root/.local/bin:$PATH"
+
+# Cài đặt các gói cần thiết
 RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    tzdata \
     libreoffice \
-    python3 \
-    python3-pip && \
-    apt-get clean
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Tạo thư mục làm việc
+# Cài đặt UV Package Manager
+RUN wget -qO- https://astral.sh/uv/install.sh | sh
+
+# Thiết lập thư mục làm việc
 WORKDIR /app
 
 # Sao chép mã nguồn vào container
 COPY . .
 
-# Cài đặt các thư viện Python
-RUN pip3 install .
+# Đồng bộ dependencies qua UV
+RUN uv sync
 
-# Expose cổng ứng dụng (thay 8000 bằng cổng mà FastAPI đang dùng)
+# Expose cổng ứng dụng
 EXPOSE 8000
 
 # Lệnh khởi động ứng dụng
