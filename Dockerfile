@@ -1,43 +1,24 @@
-FROM python:3.10
+# Base image có hỗ trợ Python và các công cụ cần thiết
+FROM ubuntu:20.04
 
-ENV PYTHONUNBUFFERED=1
+# Cập nhật hệ thống và cài đặt LibreOffice
+RUN apt-get update && apt-get install -y \
+    libreoffice \
+    python3 \
+    python3-pip && \
+    apt-get clean
 
-WORKDIR /app/
+# Tạo thư mục làm việc
+WORKDIR /app
 
-# Install uv
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#installing-uv
-COPY --from=ghcr.io/astral-sh/uv:0.4.15 /uv /bin/uv
+# Sao chép mã nguồn vào container
+COPY . .
 
-# Place executables in the environment at the front of the path
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#using-the-environment
-ENV PATH="/app/.venv/bin:$PATH"
+# Cài đặt các thư viện Python
+RUN pip3 install .
 
-# Compile bytecode
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#compiling-bytecode
-ENV UV_COMPILE_BYTECODE=1
+# Expose cổng ứng dụng (thay 8000 bằng cổng mà FastAPI đang dùng)
+EXPOSE 8000
 
-# uv Cache
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#caching
-ENV UV_LINK_MODE=copy
-
-# Install dependencies
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project
-
-ENV PYTHONPATH=/app
-
-COPY ./scripts /app/scripts
-
-COPY ./pyproject.toml ./uv.lock ./alembic.ini /app/
-
-COPY ./app /app/app
-
-# Sync the project
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync
-
-CMD ["fastapi", "run", "--workers", "4", "app/main.py"]
+# Lệnh khởi động ứng dụng
+CMD ["uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8000"]
