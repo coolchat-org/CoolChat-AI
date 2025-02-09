@@ -2,10 +2,9 @@ import hashlib
 import os
 import tempfile
 import shutil
-from pathlib import Path
 import subprocess
 import time
-from typing import Any, List, Tuple, Type
+from typing import Any, List, Tuple
 from uuid import uuid4
 from charset_normalizer import detect
 from fastapi import HTTPException, UploadFile, status
@@ -14,7 +13,6 @@ from langchain_core.document_loaders.base import BaseLoader
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-# from langchain_community.vectorstores import FAISS
 from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
 from app.dtos.chatUserDto import CreateIndexDto
@@ -22,76 +20,15 @@ from app.utils.crawlsite import crawl_sites
 from app.core.config import settings
 from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
-import asyncio
 
 
 # Helper function use snake_case
-def filter_files_by_extensions(folder_path: str, extensions: list[str]) -> list[str]:
-    return [
-        os.path.join(folder_path, file)
-        for file in os.listdir(folder_path)
-        if any(file.endswith(ext) for ext in extensions)
-    ]
-
-# async def convert_doc_to_docx(doc_file: UploadFile) -> str:
-#     """
-#     Convert a .doc file to .docx format.
-    
-#     Args:
-#         doc_file (UploadFile): The uploaded .doc file.
-        
-#     Returns:
-#         str: Path to the converted .docx file.
-#     """
-#     try:
-#         # Save the uploaded .doc file to a temporary file
-#         with tempfile.NamedTemporaryFile(delete=False, suffix=".doc") as temp_doc:
-#             content = await doc_file.read()
-#             temp_doc.write(content)
-#             temp_doc_path = temp_doc.name
-
-#         # Create temporary directory for output
-#         with tempfile.TemporaryDirectory() as temp_dir:
-#             # Use LibreOffice for the conversion
-#             command = [
-#                 "soffice",
-#                 "--headless",
-#                 "--convert-to", "docx",
-#                 "--outdir", f'"{temp_dir}"',
-#                 f'"{temp_doc_path}"'
-#             ]
-
-#             print(temp_dir)
-#             print(temp_doc_path)
-
-#             # Run the conversion command
-#             process = await asyncio.create_subprocess_exec(
-#                 *command,
-#                 stdout=asyncio.subprocess.PIPE,
-#                 stderr=asyncio.subprocess.PIPE
-#             )
-#             stdout, stderr = await process.communicate()
-
-#             if process.returncode != 0:
-#                 raise RuntimeError(f"Conversion failed: {stderr.decode()}")
-
-#             # Get the output file path
-#             output_filename = Path(temp_doc_path).stem + ".docx"
-#             output_path = os.path.join(temp_dir, output_filename)
-#             print(output_filename)
-#             print(output_path)
-            
-#             # Move to a new temporary location that won't be deleted
-#             final_path = tempfile.mktemp(suffix=".docx")
-#             shutil.move(output_path, final_path)
-
-#         # Clean up the original .doc file
-#         Path(temp_doc_path).unlink(missing_ok=True)
-        
-#         return final_path
-
-#     except Exception as e:
-#         raise RuntimeError(f"Failed to convert {doc_file.filename} to .docx: {e}")
+# def filter_files_by_extensions(folder_path: str, extensions: list[str]) -> list[str]:
+#     return [
+#         os.path.join(folder_path, file)
+#         for file in os.listdir(folder_path)
+#         if any(file.endswith(ext) for ext in extensions)
+#     ]
 
 from fastapi import UploadFile
 import os
@@ -263,7 +200,7 @@ def generate_index_name(organization_id: str, prefix: str = "org-index") -> str:
 
 
 # main function use camelCase
-async def createIndexesFromFilesAndUrls(websites: List[str], pdfFiles: List[UploadFile] = None, docFiles: List[UploadFile] = None, txtFiles: List[UploadFile] = None, organization_id: str = "12345xoz"):
+async def createIndexesFromFilesAndUrls(websites: List[str], pdfFiles: List[UploadFile] = None, docFiles: List[UploadFile] = None, txtFiles: List[UploadFile] = None, organization_id: str = "12345xoz", is_virtual: bool = False):
     try:
         # --- Check index exists
         if len(pdfFiles) == 0 and len(docFiles) == 0 and len(txtFiles) == 0 and len(websites) == 0:
@@ -275,11 +212,24 @@ async def createIndexesFromFilesAndUrls(websites: List[str], pdfFiles: List[Uplo
             print("Found sites: ", len(websites))
     
         pc = Pinecone(api_key=settings.PINECONE_API_KEY)
+        # if organization_id.endswith("_0"):
+        #     organization_id = organization_id[:-2]
         index_name = generate_index_name(organization_id=organization_id)
 
         existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
         if index_name in existing_indexes:
-            raise Exception(f"Index '{index_name}' already exists.")
+            # directly create
+            if not is_virtual:
+                # do not raise exception, delete it
+                pc.delete_index(name=index_name, timeout=10)
+            else:
+                index_name = index_name + "-0"
+
+        elif index_name + "-0" in existing_indexes:
+            if not is_virtual:
+                # do not raise exception, delete it
+                pc.delete_index(name=index_name + "-0", timeout=10)
+        
         
         normalDocs: List[Document] = await load_files_by_type(pdfFiles + docFiles + txtFiles)
         webDocs: List[Document] = await crawl_sites(websites=websites)
@@ -329,4 +279,82 @@ async def createIndexesFromFilesAndUrls(websites: List[str], pdfFiles: List[Uplo
             detail=f"An unexpected error occurred: {str(e)}"
         )
 
+def saveVirtualIndex(old_index_name: str, organization_id: str = "12345xoz"):
+    try:
+        # --- Check index exists
+        pc = Pinecone(api_key=settings.PINECONE_API_KEY)
+        index_name_1 = generate_index_name(organization_id=organization_id)
+        index_name_2 = index_name_1 + "-0"
+        if old_index_name != index_name_1 and old_index_name != index_name_2:
+            raise Exception(f"Bad organization id entered!")
+        
+        if old_index_name.endswith("-0"):
+            index_to_save = index_name_1
+        else:
+            index_to_save = index_name_2
+
+        existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
+        if old_index_name not in existing_indexes:
+            raise Exception(f"Index '{old_index_name}' did not exists.")
+        elif index_to_save not in existing_indexes:
+            raise Exception(f"Index '{index_to_save}' did not exists.")
+        
+        pc.delete_index(name=old_index_name, timeout=10)        
+        index_url = pc.describe_index(index_to_save)["host"]
+
+        return CreateIndexDto(
+            message="Virtual Index saving completed successfully.",
+            index_name=index_to_save,
+            index_url=index_url,
+        )
+
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+
+def disposeVirtualIndex(old_index_name: str, organization_id: str = "12345xoz"):
+    try:
+        # --- Check index exists
+        pc = Pinecone(api_key=settings.PINECONE_API_KEY)
+        index_name_1 = generate_index_name(organization_id=organization_id)
+        index_name_2 = index_name_1 + "-0"
+        if old_index_name != index_name_1 and old_index_name != index_name_2:
+            raise Exception(f"Bad organization id entered!")
+        
+        if old_index_name.endswith("-0"):
+            index_to_delete = index_name_1
+        else:
+            index_to_delete = index_name_2
+
+        existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
+        if old_index_name not in existing_indexes:
+            raise Exception(f"Index '{old_index_name}' did not exists.")
+        elif index_to_delete not in existing_indexes:
+            raise Exception(f"Index '{index_to_delete}' did not exists.")
+        
+        pc.delete_index(name=index_to_delete, timeout=10)        
+
+        return CreateIndexDto(
+            message="Virtual Index deleting completed successfully.",
+            index_name="",
+            index_url="",
+        )
+
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
 

@@ -1,4 +1,5 @@
 import asyncio
+import json
 from typing import Any, List, Tuple
 # from fastapi import HTTPException, status
 from langchain.hub import pull
@@ -107,6 +108,81 @@ async def response_from_LLM(chat_id: str, query: str, db_host: str):
         save_task_started = True
         asyncio.create_task(save_task())
 
+async def parallel_response_from_LLM(chat_id: str, query: str, db_host_1: str, db_host_2: str):
+    question_answer_chain = get_chain()
+    history_aware_retriever_1 = get_history_aware_retriever(index_host=db_host_1)
+    history_aware_retriever_2 = get_history_aware_retriever(index_host=db_host_2)
+
+    # Tạo hai pipeline
+    ragChain1 = create_retrieval_chain(retriever=history_aware_retriever_1, combine_docs_chain=question_answer_chain)
+    ragChain2 = create_retrieval_chain(retriever=history_aware_retriever_2, combine_docs_chain=question_answer_chain)
+
+    chat_history = []
+    langchain_history: List[AIMessage | HumanMessage] = []
+
+    messages = list(map(create_LC_history, chat_history))  
+    if chat_history:
+        langchain_history.extend([msg for pair in messages for msg in pair])  # Flatten
+
+    async def stream_rag_chain(rag_chain):
+        async for chunk in rag_chain.astream({"input": query, "chat_history": langchain_history}):
+            if chunk.get('answer', None) is not None:
+                answer = chunk['answer']
+                yield answer  # Stream to client
+
+    # Tạo iterator từ async generator
+    stream1 = stream_rag_chain(ragChain1)
+    stream2 = stream_rag_chain(ragChain2)
+
+    task1 = asyncio.create_task(stream1.__anext__())
+    task2 = asyncio.create_task(stream2.__anext__())
+
+    # Add accumulators for both responses
+    full_response_1 = []
+    full_response_2 = []
+
+    while True:
+        tasks = {t for t in [task1, task2] if t is not None}
+        if not tasks:
+            # Send final accumulated responses
+            yield json.dumps({
+                "done": True,
+                "full_response_1": "".join(full_response_1),
+                "full_response_2": "".join(full_response_2)
+            })
+            return
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+        for completed_task in done:
+            try:
+                result = await completed_task
+                if completed_task == task1:
+                    full_response_1.append(result)
+                    response_data = {
+                        "response_1": result, 
+                        "response_2": None, 
+                        "done": False,
+                        "full_response_1": "".join(full_response_1),
+                        "full_response_2": "".join(full_response_2)
+                    }
+                    yield json.dumps(response_data)
+                    task1 = asyncio.create_task(stream1.__anext__())
+                else:
+                    full_response_2.append(result)
+                    response_data = {
+                        "response_1": None, 
+                        "response_2": result, 
+                        "done": False,
+                        "full_response_1": "".join(full_response_1),
+                        "full_response_2": "".join(full_response_2)
+                    }
+                    yield json.dumps(response_data)
+                    task2 = asyncio.create_task(stream2.__anext__())
+            except StopAsyncIteration:
+                if completed_task == task1:
+                    task1 = None
+                else:
+                    task2 = None
 
 async def save_chat_history_and_memory(chat: ChatModel, query: str, response: str, old_history: List[AIMessage | HumanMessage]):
     print("User: ", query)
