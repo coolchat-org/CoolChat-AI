@@ -1,11 +1,7 @@
 from bs4 import BeautifulSoup
-# import requests
-# from requests import Response
 import httpx
-import asyncio
 from typing import List
 from langchain_core.documents import Document
-# from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
 
 async def fetch_content(url: str) -> str:
