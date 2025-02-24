@@ -10,12 +10,17 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.chains.retrieval import create_retrieval_chain
 from langchain_pinecone import PineconeVectorStore
+from langchain_core.documents import Document
+from pinecone import QueryResponse
 import openai
+import requests
 from app.core.config import settings
 from app.models.chatModel import ChatModel
 from app.core.db import mongo_connection
 from pinecone import Pinecone
 from functools import lru_cache
+
+from app.models.ranker import CoolChatVectorStore
 # from transformers import AutoTokenizer, T5ForConditionalGeneration
 
 # Tải model/tokenizer tại cấp module
@@ -48,8 +53,9 @@ def get_chain():
 def get_retriever(index_host: str):
     pc = Pinecone(api_key=settings.PINECONE_API_KEY)
     index = pc.Index(host=index_host)
-    vectorStore = PineconeVectorStore(index=index, embedding=get_embedder())
-    return vectorStore.as_retriever(search_kwargs={'k': 2})  # Giảm k xuống 1
+    vectorStore = CoolChatVectorStore(index=index, embedding=get_embedder())
+    return vectorStore.as_retriever(search_kwargs={})
+
 
 def get_history_aware_retriever(index_host: str):
     retriever = get_retriever(index_host)
@@ -258,3 +264,15 @@ def tokenize_and_summarize_openai(old_context, query, response, max_token: int =
             return "", False
 
     return "", False
+
+def call_backend_transaction(data: dict) -> dict:
+    """
+    Dummy function to call a backend transaction endpoint.
+    Replace the URL and handling logic as needed.
+    """
+    backend_url = "https://your-backend-transaction-endpoint.com/api/transaction"
+    response = requests.post(backend_url, json=data)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        raise Exception(f"Backend transaction failed with status {response.status_code}")
