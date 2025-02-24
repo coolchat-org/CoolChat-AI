@@ -4,7 +4,7 @@ import tempfile
 import shutil
 import subprocess
 import time
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 from uuid import uuid4
 from charset_normalizer import detect
 from fastapi import HTTPException, UploadFile, status
@@ -20,6 +20,8 @@ from app.utils.crawlsite import crawl_sites
 from app.core.config import settings
 from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
+from PyPDF2 import PdfReader
+from docx import Document as DocxDocument
 
 
 # Helper function use snake_case
@@ -35,6 +37,8 @@ import os
 import tempfile
 import shutil
 import subprocess
+
+from app.utils.extract import extract_metadata
 
 async def convert_doc_to_docx(doc_file: UploadFile) -> str:
     """
@@ -93,7 +97,8 @@ def detect_file_encoding(file: UploadFile) -> str:
         result = detect(f.read())
         return result["encoding"]
     
-async def process_file(file: UploadFile) -> List[Document]:
+# from langchain_core.documents import Document
+async def process_file(file: UploadFile, priority: int) -> List[Document]:
     """
     Process a single file asynchronously.
     """
@@ -117,13 +122,40 @@ async def process_file(file: UploadFile) -> List[Document]:
                 temp_file.write(await file.read())
                 temp_file_path = temp_file.name
 
-             # Load the file using the specified loader
+            # Load the file using the specified loader
             if loader_cls == TextLoader:
                 encoding = detect_file_encoding(temp_file_path)  # Ensure this function takes a file path
                 loader = loader_cls(temp_file_path, encoding=encoding)
             else:
                 loader = loader_cls(temp_file_path)
             documents = loader.load()
+            for doc in documents:
+                if not doc.metadata:
+                    doc.metadata = {}
+                doc.metadata["priority"] = priority
+
+            # DEPRECATED. NOW METADATA SAVED IN METADATA.JSON
+            # # Extract metadata (pdf & word)
+            # if file.content_type == "application/pdf":
+            #     with open(temp_file_path, "rb") as f:
+            #         reader = PdfReader(f)
+            #         meta = reader.metadata
+            #         priority_value = meta.get("/Priority", "1")
+            #     for doc in documents:
+            #         if not doc.metadata:
+            #             doc.metadata = {}
+            #         doc.metadata["priority"] = priority_value
+
+            # elif file.content_type in [
+            #     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            #     "application/msword"]:
+            #     docx_doc = DocxDocument(temp_file_path)
+            #     subject_value = docx_doc.core_properties.subject
+            #     for doc in documents:
+            #         if not doc.metadata:
+            #             doc.metadata = {}
+            #         doc.metadata["priority"] = subject_value
+
             # Clean up temporary file
             os.remove(temp_file_path)
 
@@ -134,7 +166,7 @@ async def process_file(file: UploadFile) -> List[Document]:
         return []
     
 
-async def load_files_by_type(files: List[UploadFile]) -> List[Document]:
+async def load_files_by_type(files: List[UploadFile], priorities: List[int]) -> List[Document]:
     """
     Load files of a specific type and return a list of LangChain Document objects.
 
@@ -144,12 +176,12 @@ async def load_files_by_type(files: List[UploadFile]) -> List[Document]:
     Returns:
         List[Document]: A list of LangChain Document objects.
     """
-    tasks = [process_file(file) for file in files]
+    tasks = [process_file(file, priority) for file, priority in zip(files, priorities)]
     results = await tqdm_asyncio.gather(*tasks, desc="Loading files", unit="file")
     # flatten the list of document lists
     all_documents = [doc for documents in results for doc in documents]
 
-    print(f"Loaded {len(all_documents)} documents.")
+    # print(f"Loaded {len(all_documents)} documents.")
     return all_documents
 
 def set_batch_and_splitter(length: int) -> Tuple[int, RecursiveCharacterTextSplitter]:
@@ -200,16 +232,18 @@ def generate_index_name(organization_id: str, prefix: str = "org-index") -> str:
 
 
 # main function use camelCase
-async def createIndexesFromFilesAndUrls(websites: List[str], pdfFiles: List[UploadFile] = None, docFiles: List[UploadFile] = None, txtFiles: List[UploadFile] = None, organization_id: str = "12345xoz", is_virtual: bool = False):
+async def createIndexesFromFilesAndUrls(websites_data: List[Dict[str, Any]], 
+    pdfFiles: List[UploadFile] = None, docxFiles: List[UploadFile] = None, txtFiles: List[UploadFile] = None, pdfPrio: List[int] = [], docxPrio: List[int] = [], txtPrio: List[int] = [], 
+    organization_id: str = "12345xoz", is_virtual: bool = False):
     try:
         # --- Check index exists
-        if len(pdfFiles) == 0 and len(docFiles) == 0 and len(txtFiles) == 0 and len(websites) == 0:
+        if len(pdfFiles) == 0 and len(docxFiles) == 0 and len(txtFiles) == 0 and len(websites_data) == 0:
             raise ValueError("No valid files (PDF, Word, or TXT) or websites found.")
         else:
             print("Found pdf files: ", len(pdfFiles))
-            print("Found doc files: ", len(docFiles))
+            print("Found doc files: ", len(docxFiles))
             print("Found txt files: ", len(txtFiles))
-            print("Found sites: ", len(websites))
+            print("Found sites: ", len(websites_data))
     
         pc = Pinecone(api_key=settings.PINECONE_API_KEY)
         # if organization_id.endswith("_0"):
@@ -231,8 +265,14 @@ async def createIndexesFromFilesAndUrls(websites: List[str], pdfFiles: List[Uplo
                 pc.delete_index(name=index_name + "-0", timeout=10)
         
         
-        normalDocs: List[Document] = await load_files_by_type(pdfFiles + docFiles + txtFiles)
-        webDocs: List[Document] = await crawl_sites(websites=websites)
+        normalDocs: List[Document] = await load_files_by_type(
+            files=pdfFiles + docxFiles + txtFiles,
+            priorities=pdfPrio + docxPrio + txtPrio
+        )
+        webDocs: List[Document] = await crawl_sites(websites_data=websites_data)
+
+        # allDocs: List[Document] = normalDocs + webDocs
+        # allDocs = [extract_metadata(doc) for doc in (normalDocs + webDocs)]
         allDocs: List[Document] = normalDocs + webDocs
 
         print(f'Total documents loaded: {len(allDocs)}')
