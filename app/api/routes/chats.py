@@ -120,28 +120,56 @@ async def create_virtual_chatbot(org_id: str = Path(..., description="Chat ID"),
     - Info of the index, which will be send to backend.
     """
     try:
+        metadata_content = None
+
         if files:
-            pdfFiles, docFiles, txtFiles = [], [], []
+            pdfFiles, docxFiles, txtFiles = [], [], []
+            pdfPrio, docxPrio, txtPrio = [], [], []
+            metafile_idx = None
+
+            for idx, file in enumerate(files):
+                if file.filename == "metadata.json":
+                    metadata_content = await file.read()
+                    metadata_content = json.loads(metadata_content.decode("utf-8"))
+                    print("Metadata:", metadata_content)
+                    metafile_idx = idx
+                """
+                metadata.json:
+                {
+                    "files": {
+                        filename: priority1, 
+                        filename2: priority2
+                    },
+                    "urls": [
+                        {"url": string, "priority": 1},
+                        {"url": string, "priority": 1} 
+                    ]
+                }
+                """
+            del files[metafile_idx]    
+            
             for file in files:
-                if file.content_type not in ["application/pdf", "application/msword", "text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]:
+                if file.content_type == "application/pdf":
+                    pdfFiles.append(file)
+                    pdfPrio.append(metadata_content["files"][file.filename])
+                elif file.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                    docxFiles.append(file)
+                    docxPrio.append(metadata_content["files"][file.filename])
+                elif file.content_type == "text/plain":
+                    txtFiles.append(file)
+                    txtPrio.append(metadata_content["files"][file.filename])
+                else:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Unsupported file type: {file.content_type}. Only pdf, docx, doc, txt accepted.",
                     )
-                elif file.content_type == "application/pdf":
-                    pdfFiles.append(file)
-                elif file.content_type in [
-                    "application/msword",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]:
-                    docFiles.append(file)
-                elif file.content_type == "text/plain":
-                    txtFiles.append(file)
 
-        web_url: str = "https://vnexpress.net/than-thanh-hoa-ielts-4627600.html?utm_source=facebook&utm_medium=fanpage_VnE&utm_campaign=phuonguyen&fbclid=IwAR342qeRaOfJRwnJUl145GW3ojO2-S2XGcHa1XvxSqMTc6mKplJE2siI_qE"
-
-        url_list = urls.split(",") if urls else [web_url]
+        url_prio_list = []
+        if metadata_content is not None:
+            if metadata_content["urls"] is not None:
+                url_prio_list = metadata_content["urls"]  
         
-        result = await createIndexesFromFilesAndUrls(url_list, pdfFiles, docFiles, txtFiles, organization_id=org_id, is_virtual=True)
+        result = await createIndexesFromFilesAndUrls(url_prio_list, pdfFiles, docxFiles, txtFiles, pdfPrio, docxPrio, txtPrio, organization_id=org_id, is_virtual=True)
 
         result.message = "Virtual Index created!"
 
