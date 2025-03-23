@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     MONGO_DATABASE: str
     OPENAI_API_KEY: str 
     PINECONE_API_KEY: str
+    HTTP_PROXY: str
 
 
 # Khởi tạo settings
