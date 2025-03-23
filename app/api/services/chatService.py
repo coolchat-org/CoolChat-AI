@@ -1,9 +1,9 @@
 import asyncio
 import json
-from typing import Any, List, Tuple
+from typing import Any, List
 # from fastapi import HTTPException, status
 from langchain.hub import pull
-# from langchain_core.prompts import ChatPromptTemplate
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.chains.history_aware_retriever import create_history_aware_retriever
 from langchain_core.messages import HumanMessage, AIMessage
@@ -11,22 +11,13 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.chains.retrieval import create_retrieval_chain
 from langchain_pinecone import PineconeVectorStore
 from langchain_core.documents import Document
-from pinecone import QueryResponse
-import openai
-import requests
 from app.core.config import settings
 from app.models.chatModel import ChatModel
-from app.core.db import mongo_connection
 from pinecone import Pinecone
 from functools import lru_cache
 
 from app.models.ranker import CoolChatVectorStore
-# from transformers import AutoTokenizer, T5ForConditionalGeneration
-
-# Tải model/tokenizer tại cấp module
-MODEL_PATH = "CreatorPhan/ViSummary"
-tokenizer = None
-model = None
+from app.utils.summarizer import tokenize_and_summarize_openai
 
 
 @lru_cache(maxsize=1)
@@ -38,15 +29,40 @@ def get_embedder():
     return OpenAIEmbeddings(model="text-embedding-3-small", api_key=settings.OPENAI_API_KEY)
 
 @lru_cache(maxsize=1)
-def get_prompts():
+def get_prompts(company_name: str, chatbot_attitude: str):
+    system_prompt = f"""Bạn là một tư vấn viên làm việc tại bộ phận dịch vụ khách hàng của {company_name}.
+
+    HÀNH VI TRONG CUỘC HỘI THOẠI:
+    - Khi khách hàng chào mở đầu (e.g. Hello, chào bạn): Hãy chào họ một cách lịch sự bằng tiếng Việt và giới thiệu ngắn gọn về {company_name}.
+    - Nếu bạn nhận thấy câu hỏi đã xuất hiện trong lịch sử chat (không phải lời chào tạm biệt), hãy trả lời câu hỏi đó một cách nhanh chóng. Nếu không, với các câu hỏi hoặc thông tin nhập vào thông thường (không phải lời chào), hãy cung cấp câu trả lời DỰA TRÊN THÔNG TIN ĐÃ TRUY XUẤT. Luôn trả lời theo phong cách {chatbot_attitude} và bằng tiếng Việt!
+    - Khi thông tin không đủ: Thông báo lịch sự với khách hàng rằng thông tin đó không có sẵn.
+    - Kết thúc mỗi câu trả lời bằng việc hỏi khách hàng xem còn câu hỏi nào khác không.
+    - Nếu khách hàng đặt câu hỏi bằng tiếng Anh: hãy trả lời bằng tiếng Anh, nếu không thì trả lời bằng tiếng Việt như bình thường (giữ lại các jargon tiếng Anh nếu có).
+    
+    KẾT THÚC CUỘC HỘI THOẠI:
+    - Khi khách hàng nói lời chào tạm biệt, “bye”, “thank you and goodbye”, v.v.: hãy chào tạm biệt khách hàng theo phong cách {chatbot_attitude}!
+    
+    Không bao giờ tự tạo câu trả lời mà không sử dụng hệ thống truy xuất thông tin để tránh gây hiểu nhầm! Chỉ sử dụng thông tin có sẵn trong 
+    
+    {{context}}.
+    """
+
+    retrieval_qa_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}"),
+        ]
+    )
+
     return (
-        pull("davidnguyen2212/retrievala-qa-chat-for-cool-chat"),
+        retrieval_qa_prompt,
         pull("langchain-ai/chat-langchain-rephrase"),
     )
 
 @lru_cache(maxsize=1)
-def get_chain():
-    retrieval_qa_chat_prompt, _ = get_prompts()
+def get_chain(company_name: str, chatbot_attitude: str):
+    retrieval_qa_chat_prompt, _ = get_prompts(company_name, chatbot_attitude)
     model = get_model()
     return create_stuff_documents_chain(llm=model, prompt=retrieval_qa_chat_prompt)
 
@@ -57,89 +73,34 @@ def get_retriever(index_host: str):
     return vectorStore.as_retriever(search_kwargs={})
 
 
-def get_history_aware_retriever(index_host: str):
+def get_history_aware_retriever(index_host: str, company_name: str, chatbot_attitude: str):
     retriever = get_retriever(index_host)
-    _, rephrase_prompt = get_prompts()
+    _, rephrase_prompt = get_prompts(company_name, chatbot_attitude)
     return create_history_aware_retriever(
         llm=get_model(),
         retriever=retriever,
         prompt=rephrase_prompt
     )
 
-def create_LC_history(pair: Any):
-    if isinstance(pair, str):
-        return [HumanMessage(content=pair)]
-    user_msg = HumanMessage(content=pair[0])
-    ai_msg = AIMessage(content=pair[1])
 
-    return [user_msg, ai_msg]
-
-async def response_from_LLM(chat_id: str, query: str, db_host: str):
-    question_answer_chain = get_chain()
-    history_aware_retriever = get_history_aware_retriever(index_host=db_host)
-
-    ragChain = create_retrieval_chain(
-        retriever=history_aware_retriever, 
-        combine_docs_chain=question_answer_chain
-    )
-
-    conversation = await ChatModel.find_by_id(chat_id=chat_id, collection=mongo_connection.db["chats"])
-    if conversation.memory == "":
-        chat_history = []
-    else:
-        chat_history = conversation.memory
-    
-    accumulated_response = ""
-    async def save_task():
-        """Task lưu vào database chạy bất đồng bộ."""
-        if accumulated_response:
-            await save_chat_history_and_memory(chat=conversation, query=query, response=accumulated_response, old_history=langchain_history)
-
-
-    save_task_started = False  
-    langchain_history: List[AIMessage | HumanMessage] = []
-
-    messages = list(map(create_LC_history, chat_history))  
-    if len(chat_history) != 0:
-        langchain_history.extend([msg for pair in messages for msg in pair])  # Flatten
-
-    async for chunk in ragChain.astream(input={"input": query, "chat_history": langchain_history}):
-        if chunk.get('answer', None) is not None:
-            answer = chunk['answer']
-            accumulated_response += answer  # Accumulate response
-            yield answer  # Stream to client
-
-    # Save after streaming
-    if not save_task_started:
-        save_task_started = True
-        asyncio.create_task(save_task())
-
-async def parallel_response_from_LLM(chat_id: str, query: str, db_host_1: str, db_host_2: str):
-    question_answer_chain = get_chain()
-    history_aware_retriever_1 = get_history_aware_retriever(index_host=db_host_1)
-    history_aware_retriever_2 = get_history_aware_retriever(index_host=db_host_2)
+async def parallel_response_from_LLM(chat_id: str, query: str, db_host_1: str, db_host_2: str, company_name: str, chatbot_attitude: str):
+    question_answer_chain = get_chain(company_name, chatbot_attitude)
+    history_aware_retriever_1 = get_history_aware_retriever(db_host_1, company_name, chatbot_attitude)
+    history_aware_retriever_2 = get_history_aware_retriever(db_host_2, company_name, chatbot_attitude)
 
     # Tạo hai pipeline
     ragChain1 = create_retrieval_chain(retriever=history_aware_retriever_1, combine_docs_chain=question_answer_chain)
     ragChain2 = create_retrieval_chain(retriever=history_aware_retriever_2, combine_docs_chain=question_answer_chain)
 
-    chat_history = []
-    langchain_history: List[AIMessage | HumanMessage] = []
-
-    messages = list(map(create_LC_history, chat_history))  
-    if chat_history:
-        langchain_history.extend([msg for pair in messages for msg in pair])  # Flatten
-
     async def stream_rag_chain(rag_chain):
-        async for chunk in rag_chain.astream({"input": query, "chat_history": langchain_history}):
+        async for chunk in rag_chain.astream({"input": query, "chat_history": []}):
             if chunk.get('answer', None) is not None:
                 answer = chunk['answer']
                 yield answer  # Stream to client
 
-    # Tạo iterator từ async generator
+    # Create aiterator 
     stream1 = stream_rag_chain(ragChain1)
     stream2 = stream_rag_chain(ragChain2)
-
     task1 = asyncio.create_task(stream1.__anext__())
     task2 = asyncio.create_task(stream2.__anext__())
 
@@ -190,89 +151,3 @@ async def parallel_response_from_LLM(chat_id: str, query: str, db_host_1: str, d
                 else:
                     task2 = None
 
-async def save_chat_history_and_memory(chat: ChatModel, query: str, response: str, old_history: List[AIMessage | HumanMessage]):
-    print("User: ", query)
-    print("AI: ", response)
-    print(f"Context: {old_history}")
-    chat.conversations.append([query, response])
-    if len(old_history) != 0:
-        old_context: str = " ".join([msg.content for msg in old_history]) 
-        new_context, context_summarized = tokenize_and_summarize_openai(
-            old_context, query, response, max_token=2048
-        )
-    else:
-        old_context = ""
-        context_summarized = False
-    
-    if context_summarized:
-        chat.memory = [new_context]
-    else:
-        chat.memory.append([query, response])
-    
-    updated_chat = await chat.save(mongo_connection.db["chats"])
-    return updated_chat
-
-# def load_model_and_tokenizer():
-#     """
-#     Tải mô hình và tokenizer chỉ khi cần thiết.
-#     """
-#     global tokenizer, model
-#     if tokenizer is None or model is None:
-#         print("Load summarization model...")
-#         tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-#         model = T5ForConditionalGeneration.from_pretrained(MODEL_PATH).to('cpu')
-#     return tokenizer, model
-
-# def tokenize_and_summarize(old_context, query, response, max_token: int = 10024) -> Tuple[str, bool]:
-#     new_context = f"{old_context + " " if old_context != "" else ""}Customer: {query}, AI: {response}"
-#     token_count = len(new_context.split())
-    
-#     if token_count >= max_token:
-#         tokenizer, model = load_model_and_tokenizer()
-#         tokens = tokenizer(f"Tóm tắt văn bản sau: {new_context}", return_tensors='pt').input_ids
-#         output = model.generate(tokens.to('cpu'), max_new_tokens=max_token // 2)[0]
-#         predict = tokenizer.decode(output, skip_special_tokens=True)
-
-#         return predict, True
-
-#     return "", False
-
-def tokenize_and_summarize_openai(old_context, query, response, max_token: int = 2048) -> Tuple[str, bool]:
-    new_context = f"{old_context + " " if old_context != "" else ""}Customer: {query}, AI: {response}"
-    token_count = len(new_context.split())
-    
-    openai.api_key = settings.OPENAI_API_KEY
-    if token_count >= max_token:
-        try:
-            response = openai.chat.completions.create(
-                model="gpt-3.5-turbo",  # Hoặc "gpt-4" nếu cần chất lượng cao hơn
-
-                messages=[
-                    {"role": "system", "content": "Bạn là một trợ lý AI chuyên tóm tắt văn bản và cuộc hội thoại bằng tiếng Việt."},
-                    {"role": "user", "content": f"Tóm tắt văn bản sau, là một cuộc hội thoại giữa một nhân viên chăm sóc khách hàng và khách hàng: {new_context}"}
-                ],
-                max_tokens=max_token // 2,
-                temperature=0.7,  # Điều chỉnh độ sáng tạo (0.7 là giá trị cân bằng)
-                n=1,  # Số lượng kết quả trả về
-                stop=None,  # Không cần chuỗi dừng cụ thể
-            )
-            # Trích xuất kết quả tóm tắt
-            summary = response.choices[0].message.content.strip()
-            return summary, True
-        except Exception as e:
-            print(f"Error during summarization: {e}")
-            return "", False
-
-    return "", False
-
-def call_backend_transaction(data: dict) -> dict:
-    """
-    Dummy function to call a backend transaction endpoint.
-    Replace the URL and handling logic as needed.
-    """
-    backend_url = "https://your-backend-transaction-endpoint.com/api/transaction"
-    response = requests.post(backend_url, json=data)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        raise Exception(f"Backend transaction failed with status {response.status_code}")

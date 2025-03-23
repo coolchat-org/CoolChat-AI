@@ -22,23 +22,11 @@ from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 from PyPDF2 import PdfReader
 from docx import Document as DocxDocument
-
-
-# Helper function use snake_case
-# def filter_files_by_extensions(folder_path: str, extensions: list[str]) -> list[str]:
-#     return [
-#         os.path.join(folder_path, file)
-#         for file in os.listdir(folder_path)
-#         if any(file.endswith(ext) for ext in extensions)
-#     ]
-
 from fastapi import UploadFile
 import os
 import tempfile
 import shutil
 import subprocess
-
-from app.utils.extract import extract_metadata
 
 async def convert_doc_to_docx(doc_file: UploadFile) -> str:
     """
@@ -203,8 +191,8 @@ def set_batch_and_splitter(length: int) -> Tuple[int, RecursiveCharacterTextSpli
     elif length > 500:
         batch_size = 20
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=2000,          # Tăng chunk_size để giảm số lượng đoạn
-            chunk_overlap=100,        # Tăng chunk_overlap nếu cần ngữ cảnh rộng hơn
+            chunk_size=2000,          # Increase chunk_size => decrease num of paragraph
+            chunk_overlap=100,        # Increase chunk_overlap for larger context
             length_function=len,
             is_separator_regex=False
         )
@@ -298,7 +286,7 @@ async def createIndexesFromFilesAndUrls(websites_data: List[Dict[str, Any]],
         for i in tqdm(range(0, len(allDocs), batch_size), desc="Processing batches", unit="batch"):
             batch = allDocs[i:i + batch_size]
             batch_splits = text_splitter.split_documents(batch)
-            await vector_store.aadd_documents(batch_splits)  # Sử dụng phương thức bất đồng bộ
+            await vector_store.aadd_documents(batch_splits) 
         
         index_url = pc.describe_index(index_name)["host"]
 
