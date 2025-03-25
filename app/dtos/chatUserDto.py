@@ -1,9 +1,10 @@
-from typing import Any, List
+from typing import Any, List, Optional
 from pydantic import BaseModel, field_validator
 
 from typing import List, Union
 
-# Định nghĩa kiểu dữ liệu
+from app.models.interface import ChatbotAttributeConfig
+
 RawMessage = List[str]
 RawHistory = Union[List[str], List[Union[str, RawMessage]]]
 
@@ -31,6 +32,11 @@ def validate_raw_history(raw_history: RawHistory):
 class ChatUserDto(BaseModel):
     new_message: str
     org_db_host: str
+    virtual_db_host: Optional[str] = None
+    # session_id: Optional[str] = None
+
+    config: Optional[ChatbotAttributeConfig]
+
     # validate: it is string type and not empty
     @field_validator('new_message', mode='before')
     @classmethod
@@ -46,6 +52,19 @@ class CreateIndexDto(BaseModel):
     index_name: str
     index_url: str
 
+class SaveIndexDto(BaseModel):
+    old_index_name: str
+
+class ChatDemoDto(BaseModel):
+    message: str
+    # index_name: str
+    current_index_url: str
+    preview_index_url: str
+
+class LLMResponseDto(BaseModel):
+    reply: str
+    context: Any
+    message: str
 class LLMResponseDto(BaseModel):
     reply: str
     context: Any
