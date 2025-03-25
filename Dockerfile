@@ -93,8 +93,7 @@ COPY . .
 RUN uv sync
 
 # Cài đặt Playwright và browser
-RUN .venv/bin/pip install playwright && \
-    .venv/bin/playwright install --with-deps chromium
+RUN .venv/bin/playwright install --with-deps chromium
 
 # Expose cổng ứng dụng
 EXPOSE 8000

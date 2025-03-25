@@ -80,6 +80,23 @@ wheels = [
 ]
 
 [[package]]
+name = "beanie"
+version = "1.29.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "lazy-model" },
+    { name = "motor" },
+    { name = "pydantic" },
+    { name = "toml" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/df/a1/e77d6957d17138c821ed3b7fb34a9271e33d9809eaf05c07a250cd443613/beanie-1.29.0.tar.gz", hash = "sha256:f078620c3515a8222d40a3a8ab195b1d8f1153010f009ed5d205b73371c43869", size = 174878 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/28/f6038727827ed06659a57b3c70e6f4a339f57f92ce910f868ac928843a30/beanie-1.29.0-py3-none-any.whl", hash = "sha256:aeb53e6648ceccf70eb35c35233e45406fe4de4c9887075581c01b968bfec2c7", size = 86545 },
+]
+
+[[package]]
 name = "beautifulsoup4"
 version = "4.12.3"
 source = { registry = "https://pypi.org/simple" }
@@ -344,6 +361,7 @@ name = "fastapillm"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "beanie" },
     { name = "bs4" },
     { name = "deepeval" },
     { name = "docx2txt" },
@@ -369,6 +387,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "beanie", specifier = ">=1.29.0" },
     { name = "bs4", specifier = ">=0.0.2" },
     { name = "deepeval", specifier = ">=2.0.9" },
     { name = "docx2txt", specifier = ">=0.8" },
@@ -793,6 +812,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e5/4f/d416c2f73d756a02d6073fa9f918837f6737d5247a0e3ba1583b7cc625ca/langsmith-0.2.7.tar.gz", hash = "sha256:0996d12622b56ff21414ab8b5c16cbe3ff389a3668fa3fd1d82475bd57e5bc9e", size = 313256 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/07/8d/022d3e2bc7c8bc933767ace34498bb5a2bd70447359798a216a05a7262bb/langsmith-0.2.7-py3-none-any.whl", hash = "sha256:ae7a0620e9fc4da2b2e4ef7beccdadb0f9009cca0fd71ac08d372660639e2fab", size = 325671 },
+]
+
+[[package]]
+name = "lazy-model"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/47/9e/c60681be72f03845c209a86d5ce0404540c8d1818fc29bc64fc95220de5c/lazy-model-0.2.0.tar.gz", hash = "sha256:57c0e91e171530c4fca7aebc3ac05a163a85cddd941bf7527cc46c0ddafca47c", size = 8152 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0a/13/e37962a20f7051b2d6d286c3feb85754f9ea8c4cac302927971e910cc9f6/lazy_model-0.2.0-py3-none-any.whl", hash = "sha256:5a3241775c253e36d9069d236be8378288a93d4fc53805211fd152e04cc9c342", size = 13719 },
 ]
 
 [[package]]
@@ -1717,6 +1748,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ab/d3/155d2d4514f3471a25dc1d6d20549ef254e2aa9bb5b1060809b1d3b03d3a/tiktoken-0.8.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4177faa809bd55f699e88c96d9bb4635d22e3f59d635ba6fd9ffedf7150b9953", size = 1175108 },
     { url = "https://files.pythonhosted.org/packages/19/eb/5989e16821ee8300ef8ee13c16effc20dfc26c777d05fbb6825e3c037b81/tiktoken-0.8.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:5376b6f8dc4753cd81ead935c5f518fa0fbe7e133d9e25f648d8c4dabdd4bad7", size = 1236520 },
     { url = "https://files.pythonhosted.org/packages/40/59/14b20465f1d1cb89cfbc96ec27e5617b2d41c79da12b5e04e96d689be2a7/tiktoken-0.8.0-cp313-cp313-win_amd64.whl", hash = "sha256:18228d624807d66c87acd8f25fc135665617cab220671eb65b50f5d70fa51f69", size = 883849 },
+]
+
+[[package]]
+name = "toml"
+version = "0.10.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/be/ba/1f744cdc819428fc6b5084ec34d9b30660f6f9daaf70eead706e3203ec3c/toml-0.10.2.tar.gz", hash = "sha256:b3bda1d108d5dd99f4a20d24d9c348e91c4db7ab1b749200bded2f839ccbe68f", size = 22253 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/6f/7120676b6d73228c96e17f1f794d8ab046fc910d781c8d151120c3f1569e/toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b", size = 16588 },
 ]
 
 [[package]]
