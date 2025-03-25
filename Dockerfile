@@ -1,43 +1,102 @@
-FROM python:3.10
+# # Sử dụng Ubuntu làm base image
+# FROM ubuntu:22.04
 
-ENV PYTHONUNBUFFERED=1
+# # Thiết lập biến môi trường
+# ENV DEBIAN_FRONTEND=noninteractive
+# ENV TZ=Asia/Ho_Chi_Minh
+# # ENV PATH="$HOME/.local/bin:$PATH"
+# ENV PATH="/root/.local/bin:$PATH"
 
-WORKDIR /app/
+# # Cài đặt các gói cần thiết
+# RUN apt-get update && apt-get install -y \
+#     wget \
+#     curl \
+#     tzdata \
+#     libreoffice \
+#     && apt-get clean \
+#     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#installing-uv
-COPY --from=ghcr.io/astral-sh/uv:0.4.15 /uv /bin/uv
+# # Cài đặt UV Package Manager
+# RUN wget -qO- https://astral.sh/uv/install.sh | sh
 
-# Place executables in the environment at the front of the path
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#using-the-environment
-ENV PATH="/app/.venv/bin:$PATH"
+# # Thiết lập thư mục làm việc
+# WORKDIR /app
 
-# Compile bytecode
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#compiling-bytecode
-ENV UV_COMPILE_BYTECODE=1
+# # Sao chép mã nguồn vào container
+# COPY . .
 
-# uv Cache
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#caching
-ENV UV_LINK_MODE=copy
+# # Đồng bộ dependencies qua UV
+# RUN uv sync
 
-# Install dependencies
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project
+# # Expose cổng ứng dụng
+# EXPOSE 8000
 
-ENV PYTHONPATH=/app
+# # Lệnh khởi động ứng dụng
+# CMD [".venv/bin/uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8000"]
 
-COPY ./scripts /app/scripts
+# Sử dụng Ubuntu làm base image
+FROM ubuntu:22.04
 
-COPY ./pyproject.toml ./uv.lock ./alembic.ini /app/
+# Thiết lập biến môi trường
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Ho_Chi_Minh
+ENV PATH="/root/.local/bin:$PATH"
 
-COPY ./app /app/app
+# Cài đặt các gói cần thiết
+RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    tzdata \
+    libreoffice \
+    # Các gói phụ thuộc cần thiết cho Playwright
+    python3 \
+    python3-pip \
+    # Các dependencies cho trình duyệt của Playwright
+    libglib2.0-0 \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libxcb1 \
+    libxkbcommon0 \
+    libx11-6 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libatspi2.0-0 \
+    # Các gói bổ sung cho các trình duyệt khác nhau
+    libxcursor1 \
+    libxtst6 \
+    libxshmfence-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Sync the project
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync
+# Cài đặt UV Package Manager
+RUN wget -qO- https://astral.sh/uv/install.sh | sh
 
-CMD ["fastapi", "run", "--workers", "4", "app/main.py"]
+# Thiết lập thư mục làm việc
+WORKDIR /app
+
+# Sao chép mã nguồn vào container
+COPY . .
+
+# Đồng bộ dependencies qua UV
+RUN uv sync
+
+# Cài đặt Playwright và browser
+RUN .venv/bin/playwright install --with-deps chromium
+
+# Expose cổng ứng dụng
+EXPOSE 8000
+
+# Lệnh khởi động ứng dụng
+CMD [".venv/bin/uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8000"]
