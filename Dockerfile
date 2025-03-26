@@ -47,7 +47,6 @@ RUN apt-get update && apt-get install -y \
     wget \
     curl \
     tzdata \
-    libreoffice \
     # Các gói phụ thuộc cần thiết cho Playwright
     python3 \
     python3-pip \
