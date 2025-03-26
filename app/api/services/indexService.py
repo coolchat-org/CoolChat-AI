@@ -94,7 +94,7 @@ async def process_file(file: UploadFile, priority: int) -> List[Document]:
         loader_cls = Docx2txtLoader 
         if file.content_type == "application/pdf":
             loader_cls = PyPDFLoader
-        elif file.content_type == "text/plain":
+        elif file.content_type in ["text/plain; charset=utf-8", "text/plain"]:
             loader_cls = TextLoader
 
         if file.filename.endswith(".doc") and loader_cls == Docx2txtLoader:
