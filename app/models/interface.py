@@ -8,3 +8,5 @@ class SuccessResponse(BaseModel):
 class ChatbotAttributeConfig(BaseModel):
     chatbot_attitude: str
     company_name: str
+    start_sentence: str
+    end_sentence: str

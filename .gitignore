@@ -6,3 +6,6 @@ app.egg-info
 htmlcov
 .cache
 .venv
+docs/
+.env
+*.zip
