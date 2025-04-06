@@ -1,10 +1,12 @@
 from fastapi import APIRouter
 
-from app.api.routes import chats
-from app.core.config import settings
+from app.api.v1 import chats
+from app.api.v2 import chats as chats_v2
+# from app.core.config import settings
 
 api_router = APIRouter()
-api_router.include_router(chats.agent_router)
+api_router.include_router(chats.v1_router)
+api_router.include_router(chats_v2.v2_router)
 
 
 # if settings.ENVIRONMENT == "local":
