@@ -198,6 +198,7 @@ class AsyncRAGTool(BaseTool):
             {"input": query, "chat_history": chat_history},
             config={"callbacks": callbacks}
         )
+        print(f"RAG chain result: {result['answer']}")
         return result["answer"]
 
 def create_rag_tool(db_host: str, chatbot_attitude: str):
