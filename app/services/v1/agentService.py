@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime
 import json
 import os
-from typing import Any, AsyncGenerator, List, Optional, Dict, ClassVar, override
+from typing import Any, List, Optional, Dict, ClassVar, override
 from langchain.tools import Tool
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -23,7 +23,6 @@ import aiohttp  # HTTP async request
 from langchain.schema.runnable import RunnableConfig
 from langchain_core.messages import HumanMessage, AIMessage
 from app.utils.summarizer import tokenize_and_summarize_openai
-
 
 NOTIFICATION_ENDPOINT = os.environ.get(
     "NOTIFICATION_ENDPOINT", 
@@ -166,7 +165,7 @@ class AsyncRAGTool(BaseTool):
         query: str, 
         chat_history=[], 
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None
-    ) -> str:
+    ):
         """Asynchronous run method that performs RAG."""
         # Lấy callbacks từ run_manager nếu có
         callbacks = run_manager.get_child().handlers if run_manager else None
@@ -219,7 +218,8 @@ def create_unified_agent(llm, db_host: str, streaming_handler=None, session_id: 
 
     HÀNH VI TRONG CUỘC HỘI THOẠI:
     - Khi khách hàng chào mở đầu (e.g. Hello, chào bạn): Hãy chào họ một cách lịch sự và giới thiệu ngắn gọn về {company_name}.
-    - Luôn luôn sử dụng tool `answer_question` để trả lời các thắc mắc của người dùng.
+    - Luôn luôn sử dụng tool `answer_question` để trả lời các thắc mắc của người dùng, và chỉ gọi nó một lần cho mỗi câu hỏi.
+    - Sau khi nhận được kết quả từ công cụ `answer_question`, hãy trả về kết quả đó và không tiếp tục xử lý thêm.
     - Kết thúc mỗi câu trả lời bằng việc hỏi khách hàng xem còn câu hỏi nào khác không.
 
     KẾT THÚC CUỘC HỘI THOẠI:
@@ -248,6 +248,7 @@ def create_unified_agent(llm, db_host: str, streaming_handler=None, session_id: 
         tools=[end_conversation_tool, rag_tool],
         verbose=True,
         handle_parsing_errors=True,
+        max_iterations=1,
         callbacks=[streaming_handler] if streaming_handler else None,
         tool_kwargs={"callbacks": [streaming_handler]} if streaming_handler else {}  # Thêm callbacks vào công cụ
     )
@@ -255,86 +256,67 @@ def create_unified_agent(llm, db_host: str, streaming_handler=None, session_id: 
 async def response_from_LLM(session_id: str, query: str, db_host: str, company_name: str = "CoolChat Consulting Company", chatbot_attitude: str = "professional"):
     model = get_model()
     
-    # Get conversation for history
+    # Lấy lịch sử cuộc trò chuyện
     conversation = await ChatModel.get(document_id=session_id)
     langchain_history = ChatModel.convert_to_langchain_history(conversation.memory)
     
-    # Tạo streaming handler
-    streaming_handler = StreamingCallbackHandler()
+    # Tạo agent thống nhất (không cần streaming_handler)
+    unified_agent = create_unified_agent(model, db_host, session_id=session_id, company_name=company_name, chatbot_attitude=chatbot_attitude)
     
-    # Create the unified agent với streaming handler và các tham số tùy chỉnh
-    unified_agent = create_unified_agent(
-        model, 
-        db_host, 
-        streaming_handler,
-        session_id=session_id,
-        company_name=company_name, 
-        chatbot_attitude=chatbot_attitude
-    )
+    # Sử dụng hàng đợi để streaming
+    streaming_queue = asyncio.Queue()
+    is_ending = False
     
-    # Bắt đầu agent execution trong một task riêng biệt
-    config = RunnableConfig(callbacks=[streaming_handler])
-    agent_task = asyncio.create_task(
-        unified_agent.ainvoke(
-            {"input": query, "chat_history": langchain_history},
-            config=config
-        )
-    )
+    async def stream_agent_response():
+        end_signal_received = False
+        async for event in unified_agent.astream_events({"input": query, "chat_history": langchain_history}, version='v2'):
+            print(f"Event: {event['event']}, Name: {event.get('name', 'N/A')}")
+            if event["event"] == "on_tool_start" and event["name"] == "end_conversation":
+                await streaming_queue.put("[END_SIGNAL]")
+                end_signal_received = True
+            elif event["event"] == "on_tool_end" and event["name"] == "end_conversation":
+                # Lấy câu trả lời từ công cụ và gửi vào hàng đợi
+                tool_output = event["data"]["output"]
+                await streaming_queue.put(tool_output)
+            elif event["event"] == "on_chat_model_stream" and not end_signal_received:
+                token = event["data"]["chunk"].content
+                await streaming_queue.put(token)
+            elif end_signal_received:
+                break
+        
+    # Bắt đầu task streaming
+    agent_task = asyncio.create_task(stream_agent_response())
     
     accumulated_response = ""
-    is_ending = False
     save_task_started = False
     
-    async def save_task(is_end: bool):
-        """Task lưu vào database chạy bất đồng bộ."""
-        if accumulated_response:
-            await save_chat_history_and_memory(
-                chat=conversation, 
-                query=query, 
-                response=accumulated_response, 
-                old_history=langchain_history,
-                is_end=is_end
-            )
+    # Streaming từ hàng đợi
+    while True:
+        try:
+            token = await asyncio.wait_for(streaming_queue.get(), timeout=0.1)
+            if token == "[END_SIGNAL]":
+                is_ending = True
+                continue
+            accumulated_response += token
+            yield token
+        except asyncio.TimeoutError:
+            if agent_task.done():
+                break
     
-    # Stream từ queue của streaming handler
-    try:
-        while True:
-            try:
-                # Lấy token từ queue với timeout
-                token = await asyncio.wait_for(streaming_handler.queue.get(), timeout=0.1)
-                
-                # Phát hiện signal kết thúc đặc biệt
-                if token == "[END_SIGNAL]":
-                    is_ending = True
-                    print("End conversation detected via callback")
-                    
-                    # Gọi hàm notify_conversation_end tại đây
-                    asyncio.create_task(notify_conversation_end(session_id))
-                    continue  # Bỏ qua signal này, không stream đến client
-                
-                # Token thông thường
-                accumulated_response += token
-                yield token
-                
-            except asyncio.TimeoutError:
-                # Kiểm tra xem agent đã hoàn thành chưa
-                if agent_task.done():
-                    break
+    # Lưu lịch sử cuộc trò chuyện sau khi streaming
+    if not save_task_started:
+        save_task_started = True
+        asyncio.create_task(save_chat_history_and_memory(
+            chat=conversation, 
+            query=query, 
+            response=accumulated_response, 
+            old_history=langchain_history,
+            is_end=is_ending
+        ))
     
-    except asyncio.CancelledError:
-        # Xử lý khi request bị hủy
-        agent_task.cancel()
-        raise
-    
-    finally:
-        # Đảm bảo lưu lại cuộc trò chuyện
-        if not save_task_started:
-            save_task_started = True
-            asyncio.create_task(save_task(is_end=is_ending))
-        
-        if is_ending:
-            print("Conversation ended by user")
-            is_ending = False
+    # Thông báo kết thúc cuộc trò chuyện nếu cần
+    if is_ending:
+        asyncio.create_task(notify_conversation_end(session_id))
 
 async def save_chat_history_and_memory(chat: ChatModel, query: str, response: str, old_history: List[AIMessage | HumanMessage], is_end: bool):
     print("User: ", query)

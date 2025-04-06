@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import os
 import tempfile
 import shutil
@@ -7,7 +8,7 @@ import time
 from typing import Any, Dict, List, Tuple
 from uuid import uuid4
 from charset_normalizer import detect
-from fastapi import HTTPException, UploadFile, status
+from fastapi import HTTPException, UploadFile, logger, status
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain_core.document_loaders.base import BaseLoader
 from langchain_core.documents import Document
@@ -27,6 +28,10 @@ import os
 import tempfile
 import shutil
 import subprocess
+
+# Thiết lập logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 async def convert_doc_to_docx(doc_file: UploadFile) -> str:
     """
@@ -76,7 +81,6 @@ async def convert_doc_to_docx(doc_file: UploadFile) -> str:
 
 
 
-
 def detect_file_encoding(file: UploadFile) -> str:
     """
     Detect the encoding of a text file.
@@ -122,28 +126,6 @@ async def process_file(file: UploadFile, priority: int) -> List[Document]:
                     doc.metadata = {}
                 doc.metadata["priority"] = priority
 
-            # DEPRECATED. NOW METADATA SAVED IN METADATA.JSON
-            # # Extract metadata (pdf & word)
-            # if file.content_type == "application/pdf":
-            #     with open(temp_file_path, "rb") as f:
-            #         reader = PdfReader(f)
-            #         meta = reader.metadata
-            #         priority_value = meta.get("/Priority", "1")
-            #     for doc in documents:
-            #         if not doc.metadata:
-            #             doc.metadata = {}
-            #         doc.metadata["priority"] = priority_value
-
-            # elif file.content_type in [
-            #     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            #     "application/msword"]:
-            #     docx_doc = DocxDocument(temp_file_path)
-            #     subject_value = docx_doc.core_properties.subject
-            #     for doc in documents:
-            #         if not doc.metadata:
-            #             doc.metadata = {}
-            #         doc.metadata["priority"] = subject_value
-
             # Clean up temporary file
             os.remove(temp_file_path)
 
@@ -164,6 +146,7 @@ async def load_files_by_type(files: List[UploadFile], priorities: List[int]) -> 
     Returns:
         List[Document]: A list of LangChain Document objects.
     """
+    
     tasks = [process_file(file, priority) for file, priority in zip(files, priorities)]
     results = await tqdm_asyncio.gather(*tasks, desc="Loading files", unit="file")
     # flatten the list of document lists
@@ -306,6 +289,7 @@ async def createIndexesFromFilesAndUrls(websites_data: List[Dict[str, Any]],
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An unexpected error occurred: {str(e)}"
         )
+
 
 def saveVirtualIndex(old_index_name: str, organization_id: str = "12345xoz"):
     try:

@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # General settings
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str  # Đọc từ .env
+    INDEX_NAME: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
     FRONTEND_HOST: str = "http://localhost:5173"
     ENVIRONMENT: Literal["local", "staging", "production"] = "local"

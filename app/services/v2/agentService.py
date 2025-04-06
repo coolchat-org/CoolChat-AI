@@ -48,15 +48,15 @@ def get_prompts():
     
     return rephrase_prompt
 
-def get_retriever(index_host: str):
+def get_retriever(index_host: str, namespace: str):
     pc = Pinecone(api_key=settings.PINECONE_API_KEY)
     index = pc.Index(host=index_host)
     vectorStore = CoolChatVectorStore(index=index, embedding=get_embedder())
-    return vectorStore.as_retriever(search_kwargs={})
+    return vectorStore.as_retriever(search_kwargs={"namespace": namespace})
 
 
-def get_history_aware_retriever(index_host: str):
-    retriever = get_retriever(index_host)
+def get_history_aware_retriever(index_host: str, namespace: str):
+    retriever = get_retriever(index_host, namespace)
     rephrase_prompt = get_prompts()
     return create_history_aware_retriever(
         llm=get_model(),
@@ -91,7 +91,7 @@ class StreamingCallbackHandler(BaseCallbackHandler):
         if self.is_ending_conversation:
             await self.queue.put("[END_SIGNAL]")  # Set special signal
 
-def create_end_conversation_tool(session_id: str):
+def create_end_conversation_tool(end_sentence: str):
     """Create a tool for ending the conversation."""
     
     def end_conversation(input_text: str = "") -> str:
@@ -101,7 +101,7 @@ def create_end_conversation_tool(session_id: str):
         "thanks for your help, bye", "that's all I needed", etc.
         """
 
-        return "Cảm ơn quý khách đã trò chuyện. Hẹn gặp lại quý khách trong thời gian sớm nhất!"
+        return end_sentence
     
     return Tool.from_function(
         func=end_conversation,
@@ -151,9 +151,10 @@ class AsyncRAGTool(BaseTool):
     name: ClassVar[str] = "answer_question"
     description: ClassVar[str] = "Use this to answer user questions by retrieving relevant information"
     
-    def __init__(self, db_host: str, chatbot_attitude: str):
+    def __init__(self, db_host: str, namespace: str, chatbot_attitude: str):
         super().__init__()
         self._db_host = db_host
+        self._namespace = namespace
         self._chatbot_attitude = chatbot_attitude
 
     def _run(self, query: str, chat_history=[]) -> str:
@@ -170,7 +171,7 @@ class AsyncRAGTool(BaseTool):
         # Lấy callbacks từ run_manager nếu có
         callbacks = run_manager.get_child().handlers if run_manager else None
         
-        retriever = get_history_aware_retriever(index_host=self._db_host)
+        retriever = get_history_aware_retriever(index_host=self._db_host, namespace=self._namespace)
         
         question_answer_chain = create_stuff_documents_chain(
             llm=get_model().with_config({"callbacks": callbacks}) if callbacks else get_model(),
@@ -200,15 +201,15 @@ class AsyncRAGTool(BaseTool):
         )
         return result["answer"]
 
-def create_rag_tool(db_host: str, chatbot_attitude: str):
+def create_rag_tool(db_host: str, namespace: str, chatbot_attitude: str):
     """Create a tool that performs RAG for answering questions."""
-    return AsyncRAGTool(db_host=db_host, chatbot_attitude=chatbot_attitude)
+    return AsyncRAGTool(db_host=db_host, namespace=namespace, chatbot_attitude=chatbot_attitude)
 
-def create_unified_agent(llm, db_host: str, streaming_handler=None, session_id: str = None, company_name: str = "CoolChat Consulting Company", chatbot_attitude: str = "professional"):
+def create_unified_agent(llm, db_host: str, streaming_handler=None, namespace: str = None, company_name: str = "CoolChat Consulting Company", chatbot_attitude: str = "professional", start_sentence: str = "Chào bạn, đây là ban tư vấn khách hàng của công ty chúng tôi", end_sentence: str = "Cảm ơn quý khách đã trò chuyện. Hẹn gặp lại quý khách trong thời gian sớm nhất!"):
     """Create a unified agent that can detect goodbyes and perform RAG."""
     
-    end_conversation_tool = create_end_conversation_tool(session_id)
-    rag_tool = create_rag_tool(db_host, chatbot_attitude)
+    end_conversation_tool = create_end_conversation_tool(end_sentence=end_sentence)
+    rag_tool = create_rag_tool(db_host, namespace, chatbot_attitude)
 
     system_prompt = f"""Bạn là một tư vấn viên làm việc tại bộ phận dịch vụ khách hàng của {company_name}.
 
@@ -217,8 +218,9 @@ def create_unified_agent(llm, db_host: str, streaming_handler=None, session_id: 
     2. `end_conversation`: CHỈ sử dụng công cụ này khi khách hàng rõ ràng muốn kết thúc cuộc hội thoại.
 
     HÀNH VI TRONG CUỘC HỘI THOẠI:
-    - Khi khách hàng chào mở đầu (e.g. Hello, chào bạn): Hãy chào họ một cách lịch sự và giới thiệu ngắn gọn về {company_name}.
-    - Luôn luôn sử dụng tool `answer_question` để trả lời các thắc mắc của người dùng.
+    - Khi khách hàng chào mở đầu (e.g. Hello, chào bạn): Hãy chào họ một cách lịch sự với câu mẫu sau: "{start_sentence}" và giới thiệu ngắn gọn về {company_name}.
+    - Luôn luôn sử dụng tool `answer_question` để trả lời các thắc mắc của người dùng, và chỉ gọi nó một lần cho mỗi câu hỏi.
+    - Sau khi nhận được kết quả từ công cụ `answer_question`, hãy trả về kết quả đó và không tiếp tục xử lý thêm.
     - Kết thúc mỗi câu trả lời bằng việc hỏi khách hàng xem còn câu hỏi nào khác không.
 
     KẾT THÚC CUỘC HỘI THOẠI:
@@ -247,11 +249,16 @@ def create_unified_agent(llm, db_host: str, streaming_handler=None, session_id: 
         tools=[end_conversation_tool, rag_tool],
         verbose=True,
         handle_parsing_errors=True,
+        max_iterations=1,
         callbacks=[streaming_handler] if streaming_handler else None,
         tool_kwargs={"callbacks": [streaming_handler]} if streaming_handler else {}  # Thêm callbacks vào công cụ
     )
 
-async def response_from_LLM(session_id: str, query: str, db_host: str, company_name: str = "CoolChat Consulting Company", chatbot_attitude: str = "professional"):
+async def response_from_LLM(session_id: str, query: str, 
+            db_host: str, namespace: str,
+            company_name: str = "CoolChat Consulting Company", chatbot_attitude: str = "professional", start_sentence: str = "Chào bạn, đây là ban tư vấn khách hàng của công ty chúng tôi",
+            end_sentence: str = "Cảm ơn quý khách đã trò chuyện. Hẹn gặp lại quý khách trong thời gian sớm nhất!"
+):
     model = get_model()
     
     # Lấy lịch sử cuộc trò chuyện
@@ -259,21 +266,28 @@ async def response_from_LLM(session_id: str, query: str, db_host: str, company_n
     langchain_history = ChatModel.convert_to_langchain_history(conversation.memory)
     
     # Tạo agent thống nhất (không cần streaming_handler)
-    unified_agent = create_unified_agent(model, db_host, session_id=session_id, company_name=company_name, chatbot_attitude=chatbot_attitude)
+    unified_agent = create_unified_agent(model, db_host, namespace=namespace, company_name=company_name, chatbot_attitude=chatbot_attitude, start_sentence=start_sentence, end_sentence=end_sentence)
     
     # Sử dụng hàng đợi để streaming
     streaming_queue = asyncio.Queue()
     is_ending = False
     
     async def stream_agent_response():
-        # print(even)
+        end_signal_received = False
         async for event in unified_agent.astream_events({"input": query, "chat_history": langchain_history}, version='v2'):
             if event["event"] == "on_tool_start" and event["name"] == "end_conversation":
                 await streaming_queue.put("[END_SIGNAL]")
-            elif event["event"] == "on_chat_model_stream":
+                end_signal_received = True
+            elif event["event"] == "on_tool_end" and event["name"] == "end_conversation":
+                # Lấy câu trả lời từ công cụ và gửi vào hàng đợi
+                tool_output = event["data"]["output"]
+                await streaming_queue.put(tool_output)
+            elif event["event"] == "on_chat_model_stream" and not end_signal_received:
                 token = event["data"]["chunk"].content
                 await streaming_queue.put(token)
-    
+            elif end_signal_received:
+                break
+        
     # Bắt đầu task streaming
     agent_task = asyncio.create_task(stream_agent_response())
     

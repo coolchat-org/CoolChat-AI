@@ -1,89 +1,89 @@
 import json
-from typing import Any, List
+from typing import Any, Dict, List
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status, Path, Body
 from fastapi.responses import StreamingResponse
-from app.api.services.chatService import parallel_response_from_LLM
-from app.api.services.agentService import response_from_LLM
-from app.api.services.indexService import createIndexesFromFilesAndUrls, disposeVirtualIndex, saveVirtualIndex
+from app.api.v1.supporter import get_file_type
+from app.services.v1.chatService import parallel_response_from_LLM
+from app.services.v1.agentService import response_from_LLM
+from app.services.v1.indexService import createIndexesFromFilesAndUrls, disposeVirtualIndex, saveVirtualIndex
 from app.dtos.chatUserDto import ChatUserDto, CreateIndexDto, SaveIndexDto
 from app.models.chatModel import ChatModel
 
 
-agent_router = APIRouter(prefix="/chat", tags=["chat"])
+v1_router = APIRouter(prefix="/v1/chat", tags=["chat-v1-onrender"])
 
-#####################################################
-###  MANIPULATING 
-###  BOT'S KNOWLEDGE
-#####################################################
-@agent_router.post("/training-chatbot/{org_id}", response_model=CreateIndexDto)
+    
+@v1_router.post("/training-chatbot/{org_id}", response_model=CreateIndexDto)
 async def create_knowledge_database(org_id: str = Path(..., description="Organization ID"),
     # handling passing files from frontend
     files: List[UploadFile] = File(..., description="Files to create index from and metadata.json"),
     ) -> Any:
     """
-    Create vector database (training chatbot). It will hash the organization id and use the operation's result to create a unique database name.
+    Create a vector database for training the chatbot.
 
-    @params
+    This endpoint hashes the organization ID to generate a unique database name and processes the uploaded files and URLs to build an index.
 
-    Root:
-    - org_id: organization id
+    **Parameters:**
+      - **org_id**: *str*  
+        The unique organization ID provided as a path parameter (e.g., "org123").
+      - **files**: *List[UploadFile]*  
+        A list of uploaded files via form data. This includes PDFs, DOCX, TXT files, and a mandatory `metadata.json`.
 
-    Form-Data:
-    - files: list of uploaded files, including metadata file.
+    **metadata.json:**
+    
+    The `metadata.json` file should follow the structure below:
 
-    @returns
+    ```json
+    {
+        "files": {
+            "example.pdf": 1,
+            "example.docx": 2
+        },
+        "urls": [
+            {"url": "https://example.com", "priority": 1}
+        ]
+    }
+    ```
 
-    - Info of the index, which will be send to backend.
+    **Returns:**
+      - **CreateIndexDto**: An object containing information about the created index, such as success status and a message.
     """
     try:
-        metadata_content = None
+        # First we need to authorize the organization id
+        # if not validate_organization_id(organization_id):
+        #     raise HTTPException(status_code=400, detail="Invalid organization ID.")
 
-        if files:
-            pdfFiles, docxFiles, txtFiles = [], [], []
-            pdfPrio, docxPrio, txtPrio = [], [], []
-            metafile_idx = None
+        # Check metadata.json
+        metafile = next((file for file in files if file.filename == "metadata.json"), None)
+        if metafile is None:
+            raise HTTPException(status_code=400, detail="metadata.json is required")
+        
+        # Read meta file
+        metadata_content = await metafile.read()
+        metadata_content = json.loads(metadata_content.decode("utf-8"))
 
-            for idx, file in enumerate(files):
-                if file.filename == "metadata.json":
-                    metadata_content = await file.read()
-                    metadata_content = json.loads(metadata_content.decode("utf-8"))
-                    print("Metadata:", metadata_content)
-                    metafile_idx = idx
-                """
-                metadata.json:
-                {
-                    "files": {
-                        filename: priority1, 
-                        filename2: priority2
-                    },
-                    "urls": [
-                        {"url": string, "priority": 1},
-                        {"url": string, "priority": 1} 
-                    ]
-                }
-                """
-            del files[metafile_idx]    
-            
-            for file in files:
-                if file.content_type == "application/pdf":
-                    pdfFiles.append(file)
-                    pdfPrio.append(metadata_content["files"][file.filename])
-                elif file.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-                    docxFiles.append(file)
-                    docxPrio.append(metadata_content["files"][file.filename])
-                elif file.content_type == "text/plain" or file.content_type == "text/plain; charset=utf-8":
-                    txtFiles.append(file)
-                    txtPrio.append(metadata_content["files"][file.filename])
-                else:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Unsupported file type: {file.content_type}. Only pdf, docx, doc, txt accepted.",
-                    )
+        # Remove meta file
+        files = [f for f in files if f.filename != "metadata.json"]
 
-        url_prio_list = []
-        if metadata_content is not None:
-            if metadata_content["urls"] is not None:
-                url_prio_list = metadata_content["urls"]  
+        # Separate file types
+        pdfFiles, docxFiles, txtFiles = [], [], []
+        pdfPrio, docxPrio, txtPrio = [], [], []
+
+        for file in files:
+            file_type = get_file_type(file)
+            if file_type == "pdf":
+                pdfFiles.append(file)
+                pdfPrio.append(metadata_content["files"].get(file.filename, 0))
+            elif file_type == "docx":
+                docxFiles.append(file)
+                docxPrio.append(metadata_content["files"].get(file.filename, 0))
+            elif file_type == "txt":
+                txtFiles.append(file)
+                txtPrio.append(metadata_content["files"].get(file.filename, 0))
+            else:
+                raise HTTPException(status_code=400, detail=f"Unsupported file: {file.filename}")
+
+        url_prio_list: List[Dict[str, Any]] = metadata_content.get("urls", [])
 
         result = await createIndexesFromFilesAndUrls(url_prio_list, pdfFiles, docxFiles, txtFiles, pdfPrio, docxPrio, txtPrio, organization_id=org_id)
 
@@ -98,7 +98,9 @@ async def create_knowledge_database(org_id: str = Path(..., description="Organiz
             detail=f"An unexpected error occurred: {str(e)}"
         )
 
-@agent_router.post("/create-virtual-chatbot/{org_id}", response_model=CreateIndexDto)
+
+
+@v1_router.post("/create-virtual-chatbot/{org_id}", response_model=CreateIndexDto)
 async def create_virtual_chatbot(org_id: str = Path(..., description="Organization ID"),
     # handling passing files from frontend
     files: List[UploadFile] = File(..., description="Files to create index from")
@@ -183,7 +185,7 @@ async def create_virtual_chatbot(org_id: str = Path(..., description="Organizati
             detail=f"An unexpected error occurred: {str(e)}"
         )
     
-@agent_router.post("/save-virtual-chatbot/{org_id}", response_model=CreateIndexDto)
+@v1_router.post("/save-virtual-chatbot/{org_id}", response_model=CreateIndexDto)
 def save_virtual_chatbot(org_id: str = Path(..., description="Chat ID"),
 user_data: SaveIndexDto = Body(..., description="User's Input Query and Chat history")) -> Any:
     """
@@ -212,7 +214,7 @@ user_data: SaveIndexDto = Body(..., description="User's Input Query and Chat his
             detail=f"An unexpected error occurred: {str(e)}"
         )
     
-@agent_router.delete("/dispose-virtual-chatbot/{org_id}", response_model=CreateIndexDto)
+@v1_router.delete("/dispose-virtual-chatbot/{org_id}", response_model=CreateIndexDto)
 def dispose_virtual_chatbot(org_id: str = Path(..., description="Chat ID"),
 user_data: SaveIndexDto = Body(..., description="User's Input Query and Chat history")) -> Any:
     """
@@ -241,7 +243,7 @@ user_data: SaveIndexDto = Body(..., description="User's Input Query and Chat his
             detail=f"An unexpected error occurred: {str(e)}"
         )
 
-@agent_router.put("/new-chat", response_model=Any)
+@v1_router.put("/new-chat", response_model=Any)
 async def create_new_chat() -> Any:
     """
     Create new chat. Use its _id returned field to operate in other routes.
@@ -259,7 +261,7 @@ async def create_new_chat() -> Any:
     return new_conversation
 
 
-@agent_router.get("/{id}", response_model=Any)
+@v1_router.get("/{id}", response_model=Any)
 async def read_items(id: str = Path(..., description="Chat ID")) -> Any:
     """
     Get all info of a specific conversation.
@@ -276,7 +278,7 @@ async def read_items(id: str = Path(..., description="Chat ID")) -> Any:
     conversation = await ChatModel.get(id)
     return conversation
 
-@agent_router.post("/{id}", response_model=Any)
+@v1_router.post("/{id}", response_model=Any)
 async def create_reply_message(
     id: str = Path(..., description="Chat ID"),
     user_data: ChatUserDto = Body(..., description="User's Input Query and Chat history")
@@ -325,7 +327,7 @@ async def create_reply_message(
         )
 
 
-@agent_router.post("/compare/{org_id}", response_model=Any)
+@v1_router.post("/compare/{org_id}", response_model=Any)
 async def create_parallel_reply_message(
     org_id: str = Path(..., description="Organization ID"),
     user_data: ChatUserDto = Body(..., description="User's Input Query and Chat history")

@@ -47,13 +47,39 @@ class ChatUserDto(BaseModel):
             raise ValueError("new_message must not be empty")
         return v
     
+class ChatUserDtoV2(BaseModel):
+    new_message: str
+    index_host: str
+    namespace: str
+    virtual_namespace: Optional[str] = None
+
+    config: Optional[ChatbotAttributeConfig]
+
+    # validate: it is string type and not empty
+    @field_validator('new_message', mode='before')
+    @classmethod
+    def ensure_valid_str(cls, v: Any) -> Any:
+        if not isinstance(v, str):
+            raise ValueError("new_message must be a string")
+        if not v.strip():
+            raise ValueError("new_message must not be empty")
+        return v
+    
 class CreateIndexDto(BaseModel):
     message: str
     index_name: str
     index_url: str
 
+class CreateNamespaceDto(BaseModel):
+    message: str
+    namespace: str
+    index_url: str
+
 class SaveIndexDto(BaseModel):
     old_index_name: str
+
+class SaveNamespaceDto(BaseModel):
+    current_namespace: str
 
 class ChatDemoDto(BaseModel):
     message: str
