@@ -32,17 +32,11 @@ WORKDIR /app
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Create virtual environment
+# Create virtual environment and install dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv venv
-
-# Install grpcio with specific build flags to avoid compilation issues
-RUN --mount=type=cache,target=/root/.cache/uv \
-    .venv/bin/uv pip install grpcio==1.60.1 --config-settings="--global-option=build_ext" --config-settings="--global-option=-I/usr/include/openssl"
-
-# Install remaining dependencies
-RUN --mount=type=cache,target=/root/.cache/uv \
-    .venv/bin/uv sync --frozen
+    uv venv && \
+    uv pip install grpcio==1.60.1 --config-settings="--global-option=build_ext" --config-settings="--global-option=-I/usr/include/openssl" && \
+    uv sync --frozen
 
 # Copy application code
 COPY . .
