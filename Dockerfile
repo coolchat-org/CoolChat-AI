@@ -6,7 +6,8 @@ ENV TZ=Asia/Ho_Chi_Minh
 ENV PATH="/root/.local/bin:$PATH"
 ENV PYTHONUNBUFFERED=1  
 ENV PYTHONDONTWRITEBYTECODE=1  
-ENV PORT=8000
+ENV GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1
+ENV GRPC_PYTHON_BUILD_WITH_CYTHON=1
 
 # Cài đặt các gói cần thiết
 RUN apt-get update && apt-get install -y \
@@ -15,34 +16,14 @@ RUN apt-get update && apt-get install -y \
     tzdata \
     python3 \
     python3-pip \
-    # Thêm build dependencies
+    # Build dependencies
     build-essential \
     python3-dev \
-    # Các dependencies cho Playwright
-    libglib2.0-0 \
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libdbus-1-3 \
-    libxcb1 \
-    libxkbcommon0 \
-    libx11-6 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxext6 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libpango-1.0-0 \
-    libcairo2 \
-    libasound2 \
-    libatspi2.0-0 \
-    libxcursor1 \
-    libxtst6 \
-    libxshmfence-dev \
+    # Dependencies cho grpcio
+    gcc \
+    g++ \
+    pkg-config \
+    libssl-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -56,8 +37,9 @@ WORKDIR /app
 COPY pyproject.toml .
 COPY uv.lock .  
 
-# Đồng bộ dependencies qua UV
-RUN uv sync --frozen 
+# Đồng bộ dependencies qua UV với build cache
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --platform linux_x86_64
 
 # Sao chép toàn bộ mã nguồn
 COPY . .
@@ -67,11 +49,7 @@ RUN useradd -m -r appuser && chown -R appuser:appuser /app
 USER appuser
 
 # Expose cổng ứng dụng
-EXPOSE ${PORT}
+EXPOSE 8000
 
-# Start application
-CMD [".venv/bin/gunicorn", "app.server:app", \
-    "--workers", "${WORKERS}", \
-    "--worker-class", "uvicorn.workers.UvicornWorker", \
-    "--bind", "0.0.0.0:${PORT}", \
-    "--log-level", "info"]
+# Lệnh khởi động ứng dụng với Gunicorn
+CMD [".venv/bin/gunicorn", "app.server:app", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--log-level", "info"]
