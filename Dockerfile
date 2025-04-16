@@ -55,6 +55,8 @@ COPY pyproject.toml uv.lock ./
 # Đồng bộ dependencies qua UV sử dụng cache (BuildKit phải được bật)
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv && \
+    # Install Cython first
+    uv pip install Cython==0.29.36 && \
     # Install grpcio with specific build flags
     GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
     GRPC_PYTHON_BUILD_WITH_CYTHON=1 \
