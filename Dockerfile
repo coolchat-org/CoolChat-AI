@@ -1,18 +1,11 @@
-# syntax=docker/dockerfile:1.4
 FROM ubuntu:22.04
 
-# Thiết lập biến môi trường hệ thống
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Asia/Ho_Chi_Minh
-ENV PATH="/root/.local/bin:$PATH"
-ENV PYTHONUNBUFFERED=1  
-ENV PYTHONDONTWRITEBYTECODE=1  
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Asia/Ho_Chi_Minh \
+    PATH="/root/.local/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
-# Thêm biến môi trường cần thiết cho grpcio
-ENV GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1
-ENV GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1
-
-# Cài đặt các gói hệ thống cần thiết và dependencies xây dựng
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
@@ -25,30 +18,25 @@ RUN apt-get update && apt-get install -y \
     g++ \
     pkg-config \
     libssl-dev \
+    libz-dev \
     libffi-dev \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Nâng cấp pip, setuptools và wheel
-RUN python3 -m pip install --upgrade pip setuptools wheel
-
-# Cài đặt UV Package Manager
+# Cài UV
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Thiết lập thư mục làm việc
+# Cài grpcio trước để tránh build lại
+RUN python3 -m pip install --upgrade pip && \
+    pip install grpcio==1.60.1
+
 WORKDIR /app
 
-# Copy file cấu hình cài đặt dependencies trước để tận dụng cache
 COPY pyproject.toml uv.lock ./
-
-# Đồng bộ dependencies qua UV sử dụng cache (BuildKit phải được bật)
 RUN uv sync --frozen
-    
 
-# Copy toàn bộ mã nguồn còn lại
 COPY . .
 
-# Expose cổng ứng dụng
 EXPOSE 8000
 
-# Lệnh khởi động ứng dụng với Gunicorn
 CMD [".venv/bin/gunicorn", "app.server:app", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--log-level", "info"]
