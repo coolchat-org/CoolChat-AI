@@ -1,12 +1,16 @@
 # syntax=docker/dockerfile:1.4
 FROM ubuntu:22.04
 
-# Thiết lập biến môi trường
+# Thiết lập biến môi trường hệ thống
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Ho_Chi_Minh
 ENV PATH="/root/.local/bin:$PATH"
 ENV PYTHONUNBUFFERED=1  
 ENV PYTHONDONTWRITEBYTECODE=1  
+
+# Thêm biến môi trường cần thiết cho grpcio
+ENV GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1
+ENV GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1
 
 # Cài đặt các gói hệ thống cần thiết và dependencies xây dựng
 RUN apt-get update && apt-get install -y \
@@ -38,6 +42,7 @@ COPY pyproject.toml uv.lock ./
 
 # Đồng bộ dependencies qua UV sử dụng cache (BuildKit phải được bật)
 RUN uv sync --frozen
+    
 
 # Copy toàn bộ mã nguồn còn lại
 COPY . .
