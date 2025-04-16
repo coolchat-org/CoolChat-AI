@@ -24,19 +24,16 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install UV
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
+# Copy requirements file
+COPY requirements.txt .
 
 # Create virtual environment and install dependencies
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv venv && \
-    uv pip install grpcio==1.60.1 --config-settings="--global-option=build_ext" --config-settings="--global-option=-I/usr/include/openssl" && \
-    uv sync --frozen
+RUN python3 -m venv .venv && \
+    .venv/bin/pip install --upgrade pip && \
+    .venv/bin/pip install grpcio==1.60.1 && \
+    .venv/bin/pip install -r requirements.txt
 
 # Copy application code
 COPY . .
