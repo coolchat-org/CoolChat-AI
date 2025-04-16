@@ -35,7 +35,7 @@ COPY pyproject.toml uv.lock ./
 
 # Đồng bộ dependencies qua UV sử dụng cache (BuildKit phải được bật)
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --platform linux_x86_64
+    uv sync --frozen
 
 # Copy toàn bộ mã nguồn còn lại
 COPY . .
