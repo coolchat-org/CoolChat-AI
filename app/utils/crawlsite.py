@@ -321,71 +321,56 @@ import httpx
 from typing import Any, Dict, List
 from langchain_core.documents import Document
 from tqdm.asyncio import tqdm_asyncio
+import os
+# import firecrawl
+from firecrawl import FirecrawlApp
 
-async def fetch_content(url: str) -> str:
-    """
-    Fetch the content of a single website asynchronously.
-    """
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.text
-    
-async def crawl_sites(websites_data: List[Dict[str, Any]]) -> List[Document]:
-    """
-    Crawl content from a list of websites and return LangChain Document objects.
-    """
-    documents: List[Document] = []
-    if len(websites_data) == 0:
+# from app.core.config import settings
+# Initialize Firecrawl client
+# firecrawl_client = firecrawl.Client(api_key=os.getenv("FIRECRAWL_API_KEY"))
+
+import asyncio
+from langchain_community.document_loaders.firecrawl import FireCrawlLoader
+from tqdm.asyncio import tqdm_asyncio
+from langchain_core.documents import Document
+
+async def load_site(url: str, priority: int, api_key: str) -> list[Document]:
+    # loader = FireCrawlLoader(api_key=settings.FIRECRAWL_API_KEY, url=url, mode="scrape")
+    loader = FireCrawlLoader(api_key=api_key, url=url, mode="scrape")
+
+    try:
+        documents = await asyncio.to_thread(loader.load)
+        for doc in documents:
+            doc.metadata["priority"] = priority
+            doc.metadata["source"] = url
         return documents
+    except Exception as e:
+        print(f"Lỗi khi tải {url}: {e}")
+        return []
+
+async def crawl_sites(websites_data: list[dict], api_key: str) -> list[Document]:
+    tasks = [load_site(web["url"], web["priority"], api_key) for web in websites_data]
+    results = await tqdm_asyncio.gather(*tasks, desc="Collecting web info...", unit="site")
+    all_documents = [doc for res in results for doc in res if res is not None]
+    return all_documents
+
+
+# if __name__ == "__main__":
+#     # For testing, try a few different websites including some JS-heavy ones
+#     test_sites = [
+#         {"url": "https://hcmut.edu.vn/", "priority": 1},
+#         {"url": "https://reactjs.org/", "priority": 1},  # React docs
+#         # {"url": "https://vuejs.org/guide/introduction.html", "priority": 1},  # Vue docs
+#         # {"url": "https://angular.io/guide/what-is-angular", "priority": 1},  # Angular docs
+#     ]
     
-    meaningful_tags: set[str] = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "article", "section", "blockquote", "a", "div", "span"}
-
-    async def process_site(url: str, priority: int):
-        # fetch content
-        try:
-            html_content = await fetch_content(url)
-
-            # parse the content
-            soup = BeautifulSoup(html_content, "html.parser")
-
-            # remove unwanted tag
-            for tag in soup(["footer", "nav", "script", "style", "aside"]):
-                tag.decompose()
-
-            # extract content from h1 to the rest of the body
-            h1_encountered: bool = False
-            content: List[str] = []
-            for element in soup.body.descendants:
-                if element.name == "h1":
-                    h1_encountered = True
-                if h1_encountered and element.name in meaningful_tags:
-                    text = element.get_text(strip=True)
-                    # Handle anchor tags (add href)
-                    if element.name == "a" and element.get("href"):
-                        href = element["href"]
-                        text = f"{text} ({href})"
-
-                    if text:
-                        # Add a space between elements
-                        content.append(text)
- 
-            # Create a LangChain Document object
-            full_content = " ".join(content).replace("  ", " ")  # Ensure proper spacing
-            if full_content:
-                documents.append(
-                    Document(
-                        page_content=full_content, 
-                        metadata={"source": url, "priority": priority}
-                    )
-                )
-
-        except Exception as e:
-            print(f"Error while processing {url}: {e}")
-
-    # Use asyncio.gather with a progress bar
-    await tqdm_asyncio.gather(*(process_site(web_data["url"], web_data["priority"]) for web_data in websites_data), desc="Crawling websites", unit="site")
-
-    return documents
-
+#     documents = asyncio.run(crawl_sites(test_sites, api_key='fc-712957210c564e789bdf65ca35f91749'))
+    
+#     print("\n=== Crawl Results ===")
+#     for i, doc in enumerate(documents):
+#         print(f"\nDocument {i+1}:")
+#         print(f"Source: {doc.metadata['source']}")
+#         print(f"Title: {doc.metadata.get('title', 'No title')}")
+#         print(f"Content Length: {len(doc.page_content)} characters")
+#         print(f"Content Preview: {doc.page_content}...")
 
