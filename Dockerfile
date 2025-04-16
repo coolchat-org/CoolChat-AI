@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
@@ -23,18 +24,23 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Cài UV
+# Install UV
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Cài grpcio trước để tránh build lại
-RUN python3 -m pip install --upgrade pip && \
-    pip install grpcio==1.60.1
 
 WORKDIR /app
 
+# Copy dependency files
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen
 
+# Install grpcio with specific build flags to avoid compilation issues
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install grpcio==1.60.1 --config-settings="--global-option=build_ext" --config-settings="--global-option=-I/usr/include/openssl"
+
+# Install remaining dependencies
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen
+
+# Copy application code
 COPY . .
 
 EXPOSE 8000
