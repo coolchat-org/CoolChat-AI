@@ -74,6 +74,7 @@ class CoolChatVectorStore(PineconeVectorStore):
 
         # Shortener version!
         sorted_results = [elem[1][0] for elem in sorted_results]
+        sorted_results = sorted_results[:2]
         # Detail version
         # sorted_results = [elem[1] for elem in sorted_results]
         # print("3 document before: \n")

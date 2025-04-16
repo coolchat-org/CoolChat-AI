@@ -106,12 +106,12 @@ def set_batch_and_splitter(length: int) -> Tuple[int, RecursiveCharacterTextSpli
     """
     batch_size = 10
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000, chunk_overlap=50,
+        chunk_size=500, chunk_overlap=50,
         length_function=len, is_separator_regex=False)
     if length > 1000:
         batch_size = 50
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=4000,          # Tăng chunk_size để giảm số lượng đoạn
+            chunk_size=3000,          # Tăng chunk_size để giảm số lượng đoạn
             chunk_overlap=300,        # Tăng chunk_overlap nếu cần ngữ cảnh rộng hơn
             length_function=len,
             is_separator_regex=False
@@ -119,7 +119,7 @@ def set_batch_and_splitter(length: int) -> Tuple[int, RecursiveCharacterTextSpli
     elif length > 500:
         batch_size = 20
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=2000,          # Increase chunk_size => decrease num of paragraph
+            chunk_size=1000,          # Increase chunk_size => decrease num of paragraph
             chunk_overlap=100,        # Increase chunk_overlap for larger context
             length_function=len,
             is_separator_regex=False
