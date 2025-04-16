@@ -37,9 +37,9 @@ WORKDIR /app
 COPY pyproject.toml .
 COPY uv.lock .  
 
-# Đồng bộ dependencies qua UV với build cache
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --platform linux_x86_64
+# # Đồng bộ dependencies qua UV với build cache
+# RUN --mount=type=cache,target=/root/.cache/uv \
+#     uv sync --frozen --platform linux_x86_64
 
 # Sao chép toàn bộ mã nguồn
 COPY . .
