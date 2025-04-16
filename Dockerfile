@@ -8,7 +8,7 @@ ENV PATH="/root/.local/bin:$PATH"
 ENV PYTHONUNBUFFERED=1  
 ENV PYTHONDONTWRITEBYTECODE=1  
 
-# Cài đặt các gói cần thiết và dependencies xây dựng
+# Cài đặt các gói hệ thống cần thiết và dependencies xây dựng
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
@@ -21,8 +21,11 @@ RUN apt-get update && apt-get install -y \
     g++ \
     pkg-config \
     libssl-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    libffi-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Nâng cấp pip, setuptools và wheel
+RUN python3 -m pip install --upgrade pip setuptools wheel
 
 # Cài đặt UV Package Manager
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -34,8 +37,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 # Đồng bộ dependencies qua UV sử dụng cache (BuildKit phải được bật)
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen
+RUN uv sync --frozen
 
 # Copy toàn bộ mã nguồn còn lại
 COPY . .
