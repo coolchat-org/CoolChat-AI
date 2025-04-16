@@ -334,6 +334,8 @@ from langchain_community.document_loaders.firecrawl import FireCrawlLoader
 from tqdm.asyncio import tqdm_asyncio
 from langchain_core.documents import Document
 
+from app.core.config import settings
+
 async def load_site(url: str, priority: int, api_key: str) -> list[Document]:
     # loader = FireCrawlLoader(api_key=settings.FIRECRAWL_API_KEY, url=url, mode="scrape")
     loader = FireCrawlLoader(api_key=api_key, url=url, mode="scrape")
@@ -348,8 +350,8 @@ async def load_site(url: str, priority: int, api_key: str) -> list[Document]:
         print(f"Lỗi khi tải {url}: {e}")
         return []
 
-async def crawl_sites(websites_data: list[dict], api_key: str) -> list[Document]:
-    tasks = [load_site(web["url"], web["priority"], api_key) for web in websites_data]
+async def crawl_sites(websites_data: list[dict]) -> list[Document]:
+    tasks = [load_site(web["url"], web["priority"], settings.FIRECRAWL_API_KEY) for web in websites_data]
     results = await tqdm_asyncio.gather(*tasks, desc="Collecting web info...", unit="site")
     all_documents = [doc for res in results for doc in res if res is not None]
     return all_documents
