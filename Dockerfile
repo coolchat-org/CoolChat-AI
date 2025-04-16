@@ -34,8 +34,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 WORKDIR /app
 
 # Sao chép chỉ các file cần thiết để cài đặt dependencies
-COPY pyproject.toml .
-COPY uv.lock .  
+# COPY pyproject.toml .
+# COPY uv.lock .  
 
 # # Đồng bộ dependencies qua UV với build cache
 # RUN --mount=type=cache,target=/root/.cache/uv \
@@ -43,6 +43,8 @@ COPY uv.lock .
 
 # Sao chép toàn bộ mã nguồn
 COPY . .
+
+RUN uv sync
 
 # Tạo user không phải root để tăng bảo mật
 RUN useradd -m -r appuser && chown -R appuser:appuser /app
