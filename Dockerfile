@@ -21,7 +21,23 @@ RUN apt-get update && apt-get install -y \
     g++ \
     pkg-config \
     libssl-dev \
+    libz-dev \
     libffi-dev \
+    # Additional dependencies for grpcio
+    libc-ares-dev \
+    libc-ares2 \
+    libprotobuf-dev \
+    protobuf-compiler \
+    # More dependencies for grpcio
+    libabsl-dev \
+    libre2-dev \
+    libupb-dev \
+    libgflags-dev \
+    libgtest-dev \
+    libbenchmark-dev \
+    # Additional system libraries
+    libatomic1 \
+    libstdc++6 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Nâng cấp pip, setuptools và wheel
@@ -37,7 +53,13 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 
 # Đồng bộ dependencies qua UV sử dụng cache (BuildKit phải được bật)
-RUN uv sync --frozen
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv venv && \
+    # Install grpcio with specific build flags
+    GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
+    GRPC_PYTHON_BUILD_WITH_CYTHON=1 \
+    uv pip install grpcio==1.60.1 && \
+    uv sync --frozen
 
 # Copy toàn bộ mã nguồn còn lại
 COPY . .
