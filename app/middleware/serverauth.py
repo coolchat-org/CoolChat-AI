@@ -6,7 +6,10 @@ from starlette.responses import Response
 from app.core.config import settings
 
 class VerifyInternalKeyMiddleware(BaseHTTPMiddleware):
-    secret: str = settings.AI_SERVICE_API_KEY
+    def __init__(self, app):
+        super().__init__(app)
+        self.secret = settings.AI_SERVICE_API_KEY
+        
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         if request.url.path.startswith(("/docs", "/redoc", "/openapi.json")):
             return await call_next(request)
