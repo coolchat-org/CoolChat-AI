@@ -13,17 +13,17 @@ class MongoDBConnection:
     async def connect(self) -> None:
         try:
             # TCP Session
-            proxy = settings.HTTP_PROXY
-            if proxy != "nil":
-                connector = TCPConnector()
-                self.session = ClientSession(connector=connector)
-                self.client = AsyncIOMotorClient(
-                    host=settings.MONGO_URI,
-                    serverSelectionTimeoutMS=5000,
-                    proxy=proxy
-                )
-            else:
-                self.client = AsyncIOMotorClient(settings.MONGO_URI)
+            # proxy = settings.HTTP_PROXY
+            # if proxy != "nil":
+            #     connector = TCPConnector()
+            #     self.session = ClientSession(connector=connector)
+            #     self.client = AsyncIOMotorClient(
+            #         host=settings.MONGO_URI,
+            #         serverSelectionTimeoutMS=5000,
+            #         proxy=proxy
+            #     )
+            # else:
+            self.client = AsyncIOMotorClient(settings.MONGO_URI)
 
             self.db: AsyncIOMotorDatabase = self.client[settings.MONGO_DATABASE]
             await self.db.command("ping")

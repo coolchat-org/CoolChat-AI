@@ -46,4 +46,5 @@ COPY . .
 EXPOSE 8000
 
 # Lệnh khởi động ứng dụng với Gunicorn
-CMD [".venv/bin/gunicorn", "app.server:app", "--workers", "1", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--log-level", "info"]
+# CMD [".venv/bin/gunicorn", "app.server:app", "--workers", "1", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--log-level", "info"]
+CMD [".venv/bin/uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8000"]

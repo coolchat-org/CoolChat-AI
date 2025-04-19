@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     MONGO_DATABASE: str
     OPENAI_API_KEY: str 
     PINECONE_API_KEY: str
-    HTTP_PROXY: str
+    # HTTP_PROXY: str
     AI_SERVICE_API_KEY: str
     FIRECRAWL_API_KEY: str
 
