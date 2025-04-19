@@ -11,7 +11,8 @@ class VerifyInternalKeyMiddleware(BaseHTTPMiddleware):
         self.secret = settings.AI_SERVICE_API_KEY
         
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        if request.url.path.startswith(("/docs", "/redoc", "/openapi.json")):
+        EXEMPT_PATHS = ("/", "/health", "/docs", "/redoc", "/openapi.json")
+        if request.url.path in EXEMPT_PATHS:
             return await call_next(request)
         
         auth = request.headers.get("Authorization")
