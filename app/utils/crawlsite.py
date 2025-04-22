@@ -334,7 +334,7 @@ from langchain_community.document_loaders.firecrawl import FireCrawlLoader
 from tqdm.asyncio import tqdm_asyncio
 from langchain_core.documents import Document
 
-from app.core.config import settings
+# from app.core.config import settings
 
 async def load_site(url: str, priority: int, api_key: str) -> list[Document]:
     # loader = FireCrawlLoader(api_key=settings.FIRECRAWL_API_KEY, url=url, mode="scrape")
@@ -351,7 +351,8 @@ async def load_site(url: str, priority: int, api_key: str) -> list[Document]:
         return []
 
 async def crawl_sites(websites_data: list[dict]) -> list[Document]:
-    tasks = [load_site(web["url"], web["priority"], settings.FIRECRAWL_API_KEY) for web in websites_data]
+    # tasks = [load_site(web["url"], web["priority"], settings.FIRECRAWL_API_KEY) for web in websites_data]
+    tasks = [load_site(web["url"], web["priority"], 'fc-712957210c564e789bdf65ca35f91749') for web in websites_data]
     results = await tqdm_asyncio.gather(*tasks, desc="Collecting web info...", unit="site")
     all_documents = [doc for res in results for doc in res if res is not None]
     return all_documents
@@ -360,13 +361,13 @@ async def crawl_sites(websites_data: list[dict]) -> list[Document]:
 # if __name__ == "__main__":
 #     # For testing, try a few different websites including some JS-heavy ones
 #     test_sites = [
-#         {"url": "https://hcmut.edu.vn/", "priority": 1},
-#         {"url": "https://reactjs.org/", "priority": 1},  # React docs
+#         {"url": "https://itviec.com/blog/faq-chuc-nang-loi-moi-cong-viec-danh-cho-ung-vien/", "priority": 1},
+#         {"url": "https://itviec.com/blog/faq-ve-chuc-nang-company-review/", "priority": 1},  # React docs
 #         # {"url": "https://vuejs.org/guide/introduction.html", "priority": 1},  # Vue docs
 #         # {"url": "https://angular.io/guide/what-is-angular", "priority": 1},  # Angular docs
 #     ]
     
-#     documents = asyncio.run(crawl_sites(test_sites, api_key='fc-712957210c564e789bdf65ca35f91749'))
+#     documents = asyncio.run(crawl_sites(test_sites))
     
 #     print("\n=== Crawl Results ===")
 #     for i, doc in enumerate(documents):

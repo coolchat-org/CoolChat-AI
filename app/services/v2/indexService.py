@@ -106,7 +106,7 @@ def set_batch_and_splitter(length: int) -> Tuple[int, RecursiveCharacterTextSpli
     """
     batch_size = 10
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500, chunk_overlap=50,
+        chunk_size=800, chunk_overlap=100,
         length_function=len, is_separator_regex=False)
     if length > 1000:
         batch_size = 50
@@ -119,8 +119,8 @@ def set_batch_and_splitter(length: int) -> Tuple[int, RecursiveCharacterTextSpli
     elif length > 500:
         batch_size = 20
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,          # Increase chunk_size => decrease num of paragraph
-            chunk_overlap=100,        # Increase chunk_overlap for larger context
+            chunk_size=1500,          # Increase chunk_size => decrease num of paragraph
+            chunk_overlap=200,        # Increase chunk_overlap for larger context
             length_function=len,
             is_separator_regex=False
         )
@@ -196,6 +196,8 @@ async def createIndexesFromFilesAndUrls(websites_data: List[Dict[str, Any]],
             priorities=pdfPrio + docxPrio + txtPrio
         )
         webDocs: List[Document] = await crawl_sites(websites_data=websites_data)
+        for doc in webDocs:
+            print("DOc wceb: ", doc)
         allDocs: List[Document] = normalDocs + webDocs
 
         print(f'Total documents loaded: {len(allDocs)}')

@@ -47,7 +47,8 @@ class CoolChatVectorStore(PineconeVectorStore):
         )
 
         sorted_results = [elem[1][0] for elem in sorted_results]
-
+        print("Contexts: ")
+        print(sorted_results)
         # Delete duplication by "id"
         unique_docs = {doc.metadata.get("id", id(doc)): doc for doc in sorted_results}.values()
         return list(unique_docs)
@@ -75,6 +76,8 @@ class CoolChatVectorStore(PineconeVectorStore):
         # Shortener version!
         sorted_results = [elem[1][0] for elem in sorted_results]
         sorted_results = sorted_results[:2]
+        print("Contexts: ")
+        print(sorted_results)
         # Detail version
         # sorted_results = [elem[1] for elem in sorted_results]
         # print("3 document before: \n")

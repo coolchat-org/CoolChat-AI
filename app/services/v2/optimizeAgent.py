@@ -16,8 +16,8 @@ from pinecone import Pinecone
 from app.core.config import settings
 from app.core.connections import PineconeConnectionPool
 from app.models.chatModel import ChatModel
-from app.models.ranker import CoolChatVectorStore
-# from app.models.ranker_new import CoolChatVectorStore
+# from app.models.ranker import CoolChatVectorStore
+from app.models.ranker_new import CoolChatVectorStore
 
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.tools.base import BaseTool
@@ -182,13 +182,12 @@ async def notify_conversation_end(session_id: str):
 def get_qa_prompt_template(chatbot_attitude: str) -> ChatPromptTemplate:
     """Tạo prompt template dựa trên chatbot attitude"""
     return ChatPromptTemplate.from_messages([
-        ("system", f"""Trả lời câu hỏi của khách hàng dựa trên thông tin từ cơ sở tri thức sau:
+        ("system", f"""Trả lời câu hỏi của khách hàng dựa trên thông tin từ cơ sở tri thức sau bằng Tiếng Việt (giữ lại các jargon tiếng Anh nếu có):
         
         {{context}}
 
         Hướng dẫn:
         - Cung cấp câu trả lời DỰA TRÊN THÔNG TIN ĐÃ TRUY XUẤT. Luôn trả lời theo phong cách {chatbot_attitude}.
-        - Trả lời bằng tiếng Việt (giữ lại các jargon tiếng Anh nếu có).
         - Nếu thông tin không đủ để trả lời câu hỏi, hãy thông báo lịch sự rằng thông tin đó không có sẵn. Bạn không được self-generated câu trả lời để tránh gây hiểu nhầm.
         """),
         MessagesPlaceholder(variable_name="chat_history"),
@@ -258,14 +257,15 @@ def create_unified_agent(llm, db_host: str, streaming_handler=None, namespace: s
     system_prompt = f"""Bạn là một tư vấn viên làm việc tại bộ phận dịch vụ khách hàng của {company_name}.
 
     Bạn có quyền truy cập vào 2 tools:
-    1. `answer_question`: Sử dụng công cụ này để trả lời câu hỏi của khách hàng.
+    1. `answer_question`: LUÔN Sử dụng công cụ này để trả lời câu hỏi của khách hàng.
     2. `end_conversation`: CHỈ sử dụng công cụ này khi khách hàng rõ ràng muốn kết thúc cuộc hội thoại.
 
     HÀNH VI TRONG CUỘC HỘI THOẠI:
     - Khi khách hàng chào mở đầu (e.g. Hello, chào bạn): Hãy chào họ một cách lịch sự với câu mẫu sau: "{start_sentence}" và giới thiệu ngắn gọn về {company_name}.
     - Luôn luôn sử dụng tool `answer_question` để trả lời các thắc mắc của người dùng, và chỉ gọi nó một lần cho mỗi câu hỏi.
-    - Sau khi nhận được kết quả từ công cụ `answer_question`, hãy trả về kết quả đó và không tiếp tục xử lý thêm.
+    - Sau khi nhận được kết quả từ công cụ `answer_question`, hãy trả về kết quả đó và không tiếp tục xử lý thêm. Nếu dữ liệu trả về có nhắc đến {company_name}, có thể paraphrase là 'chúng tôi', 'công ty chúng tôi'..etc để tránh lặp tên doanh nghiệp và tổ chức.
     - Kết thúc mỗi câu trả lời bằng việc hỏi khách hàng xem còn câu hỏi nào khác không.
+    - Trả lời bằng tiếng Việt
 
     KẾT THÚC CUỘC HỘI THOẠI:
     - Khi khách hàng nói lời chào tạm biệt: "goodbye", "bye", "thank you and goodbye", "tạm biệt", etc.: Use the `end_conversation` tool.
@@ -286,7 +286,7 @@ def create_unified_agent(llm, db_host: str, streaming_handler=None, namespace: s
     return AgentExecutor(
         agent=agent,
         tools=[end_conversation_tool, rag_tool],
-        verbose=False,
+        verbose=True,
         handle_parsing_errors=True,
         max_iterations=1,
     )

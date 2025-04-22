@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple, Optional, Set, override
+from typing import Any, ClassVar, Dict, List, Tuple, Optional, Set, override
 from langchain_pinecone import PineconeVectorStore
 from langchain_core.retrievers import BaseRetriever
 from langchain.docstore.document import Document
@@ -57,6 +57,7 @@ class SearchResult:
 class CoolChatVectorStore(PineconeVectorStore):
     """Optimized vector store with caching and efficient search"""
     
+    @override
     def __init__(
         self, 
         index, 
@@ -66,6 +67,7 @@ class CoolChatVectorStore(PineconeVectorStore):
         cache_ttl: int = 3600,
         w_s: float = 0.6,
         w_p: float = 0.4,
+        min_similarity: float = 0.5,  # Ngưỡng độ tương đồng tối thiểu
         **kwargs
     ):
         super().__init__(index=index, embedding=embedding, text_key=text_key, **kwargs)
@@ -84,6 +86,7 @@ class CoolChatVectorStore(PineconeVectorStore):
         self.doc_mapping = {}  # Map TF-IDF indices to Documents
         self.result_cache = TTLCache(maxsize=2000, ttl=7200)  # 2 hours
         self.embedding_cache = TTLCache(maxsize=5000, ttl=86400)  # 24 hours
+        self.min_similarity = min_similarity
         
     def _get_document_id(self, doc: Document) -> str:
         """Get unique identifier for document"""
@@ -128,6 +131,7 @@ class CoolChatVectorStore(PineconeVectorStore):
         
         return self._deduplicate_docs(sorted_docs)
 
+    @override
     async def acoolchat_similarity_search(
         self,
         query: str,
@@ -136,6 +140,7 @@ class CoolChatVectorStore(PineconeVectorStore):
     ) -> List[Document]:
         """Optimized similarity search"""
         try:
+            print(f"=== Kết quả cho query old acoolchat: {query} ===")
             # Check result cache first
             cache_key = f"{query}_{k}"
             if cache_key in self.result_cache:
@@ -160,6 +165,13 @@ class CoolChatVectorStore(PineconeVectorStore):
                 k=k
             )
             
+            # **Chèn print ở đây**
+            print(f"=== Kết quả cho query: {query} ===")
+            for i, doc in enumerate(processed_results, start=1):
+                print(f"[{i}] Document ID: {self._get_document_id(doc)}")
+                print(doc.page_content)  # in nội dung
+                print("-" * 40)
+
             # Cache results
             self.result_cache[cache_key] = processed_results
             return processed_results
@@ -210,6 +222,7 @@ class CoolChatVectorStore(PineconeVectorStore):
         self.embedding_cache[cache_key] = embedding
         return embedding
 
+    @override
     def coolchat_similarity_search(
         self, 
         query: str, 
@@ -217,6 +230,8 @@ class CoolChatVectorStore(PineconeVectorStore):
         **kwargs
     ) -> List[Document]:
         """Synchronous version of similarity search"""
+        print(f"=== Kết quả cho query: {query} ===")
+
         results = self.similarity_search_with_relevance_scores(
             query=query,
             k=k,
@@ -227,6 +242,7 @@ class CoolChatVectorStore(PineconeVectorStore):
         loop = asyncio.get_event_loop()
         return loop.run_until_complete(self._process_batch(results))[:k]
 
+    @override
     async def batch_similarity_search(
         self, 
         queries: List[str], 
@@ -343,14 +359,26 @@ class CoolChatVectorStore(PineconeVectorStore):
             final_results.sort(key=lambda x: (
                 x.vector_score * alpha + x.keyword_score * (1-alpha)
             ), reverse=True)
+
+            filtered_results = [
+                result for result in final_results
+                if (result.vector_score * alpha + result.keyword_score * (1 - alpha)) >= self.min_similarity
+            ]
+
+            print(f"=== Kết quả cho query: {query} ===")
+            for i, doc in enumerate(filtered_results[:2], start=1):
+                print(f"[{i}] Document:")
+                print(doc.document.page_content)  # in nội dung
+                print("-" * 40)
             
             # Return top-k documents
-            return [result.document for result in final_results[:k]]
+            return [result.document for result in filtered_results[:2]]
             
         except Exception as e:
             print(f"Error in hybrid search: {str(e)}")
             return []
 
+    @override
     async def acoolchat_similarity_search(
         self,
         query: str,
@@ -359,66 +387,62 @@ class CoolChatVectorStore(PineconeVectorStore):
         **kwargs
     ) -> List[Document]:
         """Enhanced similarity search with hybrid option"""
+        print(f"=== Kết quả cho query: {query} ===")
         if use_hybrid:
             return await self.hybrid_search(query, k=k, **kwargs)
         
+        
         # Fall back to original vector search if hybrid is disabled
         return await super().acoolchat_similarity_search(query, k=k, **kwargs)
+    
+    @override
+    def as_retriever(self, search_kwargs: dict = None) -> BaseRetriever:
+        """
+        Return instance of CustomCoolChatRetriever, ensure that its interface similar to RetrieverLike
+        """
+        return CoolChatRetriever(vectorstore=self, search_kwargs=search_kwargs)
 
 class CoolChatRetriever(BaseRetriever):
     """Optimized retriever with caching and batch processing"""
     
     vectorstore: CoolChatVectorStore
-    search_kwargs: Dict[str, Any] = Field(default_factory=dict)
+    search_kwargs: dict[str, Any] = Field(default_factory=dict)
     cache: TTLCache = Field(default_factory=lambda: TTLCache(maxsize=100, ttl=3600))
     use_hybrid: bool = Field(default=True)  # New parameter
-    request_semaphore = asyncio.Semaphore(5)  # Limit concurrent requests
+    request_semaphore: ClassVar[asyncio.Semaphore] = asyncio.Semaphore(5)  # <-- annotate
     
+    @override
     @cached(cache=TTLCache(maxsize=100, ttl=3600))
-    def _get_relevant_documents(self, query: str) -> List[Document]:
-        """Cached synchronous document retrieval"""
-        return self.vectorstore.coolchat_similarity_search(
-            query, 
-            **self.search_kwargs
-        )
+    def _get_relevant_documents(self, query: str) -> list[Document]:
+        return self.vectorstore.coolchat_similarity_search(query, **self.search_kwargs)
     
-    async def _aget_relevant_documents(self, query: str) -> List[Document]:
-        """Optimized async retrieval"""
+    @override
+    async def _aget_relevant_documents(self, query: str) -> list[Document]:
         cache_key = f"async_{query}"
-        
-        # Fast cache lookup
-        cached_result = self.cache.get(cache_key)
-        if cached_result is not None:
-            return cached_result
-            
-        async with self.request_semaphore:  # Throttle requests
+        if (docs := self.cache.get(cache_key)) is not None:
+            return docs
+        async with self.request_semaphore:
             docs = await self.vectorstore.acoolchat_similarity_search(
-                query,
-                use_hybrid=self.use_hybrid,
-                **self.search_kwargs
+                query, use_hybrid=self.use_hybrid, **self.search_kwargs
             )
-            
         self.cache[cache_key] = docs
         return docs
     
+    @override
     async def batch_get_relevant_documents(
         self,
-        queries: List[str],
+        queries: list[str],
         batch_size: int = 5
-    ) -> List[List[Document]]:
-        """Efficient batch processing"""
+    ) -> list[list[Document]]:
         results = []
-        
-        # Process in smaller batches
         for i in range(0, len(queries), batch_size):
-            batch = queries[i:i + batch_size]
+            batch = queries[i : i + batch_size]
             batch_results = await asyncio.gather(*[
-                self._aget_relevant_documents(q)
-                for q in batch
+                self._aget_relevant_documents(q) for q in batch
             ])
             results.extend(batch_results)
-            
         return results
     
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {
+        "arbitrary_types_allowed": True,
+    }
