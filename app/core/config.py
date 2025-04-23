@@ -43,7 +43,7 @@ class Settings(BaseSettings):
         ]
 
     # Project information
-    PROJECT_NAME: str = "FastAPI Chatbot"
+    PROJECT_NAME: str = "FastAPI Chatbots"
     SENTRY_DSN: HttpUrl | None = None
 
     # MongoDB settings
