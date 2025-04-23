@@ -74,8 +74,7 @@ jobs:
             -X POST "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
             -H "Authorization: Bearer ${RENDER_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d '{"imageRef": "${IMAGE_NAME}:${DEPLOY_TAG}", "clearCache": "clear" }')
-
+            -d "{\"imageRef\":\"${IMAGE_NAME}:${DEPLOY_TAG}\",\"clearCache\":\"clear\"}")
           if [ "${HTTP_STATUS}" -ne 201 ]; then
             echo "❌ Deploy failed with status ${HTTP_STATUS}"
             echo "--- response body ---"
