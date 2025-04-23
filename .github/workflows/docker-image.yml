@@ -8,7 +8,7 @@ on:
     branches: [ master ]
 
 jobs:
-  build-push-deploy:
+  build-and-push:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -26,8 +26,8 @@ jobs:
         with:
           images: davidnguyen7603/coolchatai
           tags: |
-            type=sha,format=short  # Luôn tạo tag từ commit SHA
-            type=semver,pattern={{version}}  # Tag version nếu có git tag
+            type=sha,format=short
+            type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and Push Image
@@ -38,17 +38,24 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-push  # Chờ job build-and-push hoàn tất
+    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Deploy to Render
-        if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')) }}  
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
-          IMAGE_TAG: ${{ steps.meta.outputs.tags }}
+          IMAGE_TAG: davidnguyen7603/coolchatai:latest,davidnguyen7603/coolchatai:sha-${{ github.sha }}
         run: |
           # Nếu là git tag, chọn tag version (ví dụ: v1.0.0)
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             FULL_TAG=$(echo "$IMAGE_TAG" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' || echo "")
-          # Nếu là branch main, dùng tag 'latest'
+          # Nếu là branch master, dùng tag 'latest'
           elif [[ "${{ github.ref }}" == refs/heads/master ]]; then
             FULL_TAG="latest"
           fi
@@ -56,11 +63,18 @@ jobs:
           if [ -z "$FULL_TAG" ]; then
             FULL_TAG=$(echo "$IMAGE_TAG" | cut -d ',' -f 1)
           fi
+          # Kiểm tra xem image đã sẵn sàng trên Docker Hub
+          echo "Checking if image davidnguyen7603/coolchatai:$FULL_TAG is available..."
+          until docker pull davidnguyen7603/coolchatai:$FULL_TAG > /dev/null 2>&1; do
+            echo "Image not yet available, waiting 5 seconds..."
+            sleep 5
+          done
+          echo "Image is available, proceeding with deployment..."
           # Gọi API Render để deploy
           RESPONSE=$(curl -s -o response.txt -w "%{http_code}" -X POST "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
             -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Content-Type: application/json" \
-            -d '{"imageRef": "davidnguyen7603/coolchatai:'"$FULL_TAG"'"}')
+            -d '{"imageRef": "davidnguyen7603/coolchatai:'"$FULL_TAG"'","clearCache": true}')
           if [ "$RESPONSE" -ne 201 ]; then
             echo "❌ Deploy failed with status code: $RESPONSE"
             cat response.txt
