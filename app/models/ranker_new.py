@@ -2,17 +2,14 @@ from typing import Any, ClassVar, Dict, List, Tuple, Optional, Set, override
 from langchain_pinecone import PineconeVectorStore
 from langchain_core.retrievers import BaseRetriever
 from langchain.docstore.document import Document
-from langchain_core.vectorstores import VectorStore
 from pydantic import Field, BaseModel
 from cachetools import TTLCache, cached
 import asyncio
 from functools import lru_cache
 import numpy as np
-from collections import OrderedDict
 from sklearn.feature_extraction.text import TfidfVectorizer
 import re
 from dataclasses import dataclass
-from typing import NamedTuple
 
 class DocumentCache:
     """LRU Cache for document storage with TTL"""
@@ -131,8 +128,8 @@ class CoolChatVectorStore(PineconeVectorStore):
         
         return self._deduplicate_docs(sorted_docs)
 
-    @override
-    async def acoolchat_similarity_search(
+    # @override
+    async def acoolchat_similarity_search_original(
         self,
         query: str,
         k: int = 3,
@@ -365,7 +362,7 @@ class CoolChatVectorStore(PineconeVectorStore):
                 if (result.vector_score * alpha + result.keyword_score * (1 - alpha)) >= self.min_similarity
             ]
 
-            print(f"=== Kết quả cho query: {query} ===")
+            print(f"=== Kết quả hybrid search: {query} ===")
             for i, doc in enumerate(filtered_results[:2], start=1):
                 print(f"[{i}] Document:")
                 print(doc.document.page_content)  # in nội dung
@@ -387,13 +384,12 @@ class CoolChatVectorStore(PineconeVectorStore):
         **kwargs
     ) -> List[Document]:
         """Enhanced similarity search with hybrid option"""
-        print(f"=== Kết quả cho query: {query} ===")
         if use_hybrid:
             return await self.hybrid_search(query, k=k, **kwargs)
         
         
         # Fall back to original vector search if hybrid is disabled
-        return await super().acoolchat_similarity_search(query, k=k, **kwargs)
+        return await self.acoolchat_similarity_search_original(query, k=k, **kwargs)
     
     @override
     def as_retriever(self, search_kwargs: dict = None) -> BaseRetriever:

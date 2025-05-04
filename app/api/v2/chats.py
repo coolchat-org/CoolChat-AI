@@ -1,35 +1,37 @@
-import json
-from typing import Any, Dict, List
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status, Path, Body
+from typing import Any
+from fastapi import APIRouter, Depends, HTTPException, status, Path, Body
 from fastapi.responses import StreamingResponse
-from requests_toolbelt import user_agent
-from app.api.v2.supporter import get_file_type
-from app.services.v2.chatService import parallel_response_from_LLM
-# from app.services.v2.ragService import response_from_LLM
-from app.services.v2.optimizeAgent import response_from_LLM
-# from app.services.v2.agentService import response_from_LLM
-from app.services.v2.indexService import createIndexesFromFilesAndUrls, disposeVirtualIndex, saveVirtualIndex
-from app.dtos.chatUserDto import ChatUserDto, ChatUserDtoV2, CreateIndexDto, CreateNamespaceDto, SaveIndexDto, SaveNamespaceDto
+from app.api.v2.dependencies import IndexPreparation, prepare_index
+from app.services.v2.rag.ragCore import stream_response
+from app.services.v2.compares.chatService import parallel_response_from_LLM
+from app.services.v2.index.indexService import createIndexesFromFilesAndUrls, disposeVirtualIndex, saveVirtualIndex
+from app.dtos.chatUserDto import ChatUserDto
+from app.dtos.indexDto import CreateNamespaceDto, SaveNamespaceDto
 from app.models.chatModel import ChatModel
 
 
 v2_router = APIRouter(prefix="/v2/chat", tags=["chat-v2-vps"])
 
     
-@v2_router.post("/training-chatbot/{org_id}", response_model=CreateNamespaceDto)
-async def create_knowledge_database(org_id: str = Path(..., description="Organization ID"),
-    # handling passing files from frontend
-    files: List[UploadFile] = File(..., description="Files to create index from and metadata.json"),
-    ) -> Any:
+@v2_router.post("/training-chatbot/{org_id}", response_model=CreateNamespaceDto, summary="Create a vector database to train the chatbot",
+    responses={
+        400: {"description": "Invalid file format or metadata structure"},
+        401: {"description": "Unauthorized - Invalid/Missing API Key"},
+        413: {"description": "Request entity too large - File size limit exceeded"},
+        500: {"description": "Internal server error during index creation"}
+    }
+)
+async def create_knowledge_database(
+    org_id: str = Path(..., description="Organization ID"),
+    prep: IndexPreparation = Depends(prepare_index)
+    ):
     """
-    Create a vector database for training the chatbot.
-
     This endpoint hashes the organization ID to generate a unique database name and processes the uploaded files and URLs to build an index.
 
     **Parameters:**
-      - **org_id**: *str*  
+    - **org_id**: *str*  
         The unique organization ID provided as a path parameter (e.g., "org123").
-      - **files**: *List[UploadFile]*  
+    - **files**: *List[UploadFile]*  
         A list of uploaded files via form data. This includes PDFs, DOCX, TXT files, and a mandatory `metadata.json`.
 
     **metadata.json:**
@@ -49,47 +51,15 @@ async def create_knowledge_database(org_id: str = Path(..., description="Organiz
     ```
 
     **Returns:**
-      - **CreateIndexDto**: An object containing information about the created index, such as success status and a message.
+      - **CreateNamespaceDto**: An object containing information about the created index, such as success status and a message.
     """
     try:
-        # First we need to authorize the organization id
-        # if not validate_organization_id(organization_id):
-        #     raise HTTPException(status_code=400, detail="Invalid organization ID.")
-
-        # Check metadata.json
-        metafile = next((file for file in files if file.filename == "metadata.json"), None)
-        if metafile is None:
-            raise HTTPException(status_code=400, detail="metadata.json is required")
-        
-        # Read meta file
-        metadata_content = await metafile.read()
-        metadata_content = json.loads(metadata_content.decode("utf-8"))
-
-        # Remove meta file
-        files = [f for f in files if f.filename != "metadata.json"]
-
-        # Separate file types
-        pdfFiles, docxFiles, txtFiles = [], [], []
-        pdfPrio, docxPrio, txtPrio = [], [], []
-
-        for file in files:
-            file_type = get_file_type(file)
-            if file_type == "pdf":
-                pdfFiles.append(file)
-                pdfPrio.append(metadata_content["files"].get(file.filename, 0))
-            elif file_type == "docx":
-                docxFiles.append(file)
-                docxPrio.append(metadata_content["files"].get(file.filename, 0))
-            elif file_type == "txt":
-                txtFiles.append(file)
-                txtPrio.append(metadata_content["files"].get(file.filename, 0))
-            else:
-                raise HTTPException(status_code=400, detail=f"Unsupported file: {file.filename}")
-
-        url_prio_list: List[Dict[str, Any]] = metadata_content.get("urls", [])
-
-        result = await createIndexesFromFilesAndUrls(url_prio_list, pdfFiles, docxFiles, txtFiles, pdfPrio, docxPrio, txtPrio, organization_id=org_id)
-
+        result = await createIndexesFromFilesAndUrls(
+            prep.urls,
+            prep.pdf_files, prep.docx_files, prep.txt_files,
+            prep.pdf_prio, prep.docx_prio, prep.txt_prio,
+            organization_id=org_id
+        )
         return result
 
     except HTTPException as http_exc:
@@ -102,71 +72,30 @@ async def create_knowledge_database(org_id: str = Path(..., description="Organiz
         )
 
 
-
-@v2_router.post("/create-virtual-chatbot/{org_id}", response_model=CreateNamespaceDto)
-async def create_virtual_chatbot(org_id: str = Path(..., description="Organization ID"),
-    # handling passing files from frontend
-    files: List[UploadFile] = File(..., description="Files to create index from")
-    ) -> Any:
+@v2_router.post("/create-virtual-chatbot/{org_id}", response_model=CreateNamespaceDto, summary="Create a virtual chatbot", description=
     """
-    Compare chatbots (training virtual chatbot). It will modify the organization id 
-    (e.g. abcd -> abcd_0) and use the operation's result to create a virtual database name.
-
-    **Parameters**:
-
-        Root:
-            - org_id: Organization ID (required)
-
-        Form-Data:
-            - files: List of uploaded files, including metadata file
-
-    **Returns**:
-    - Info of the index, which will be sent to backend
-
-    **Raises**:
-    - HTTPException: If validation fails or an error occurs
-    """
+        Compare chatbots (training virtual chatbot). It will modify the organization id 
+        (e.g. abcd -> abcd_0) and use the operation's result to create a virtual database name. The parameters are the same as /training-chatbot.
+    """, 
+    responses={
+        400: {"description": "Invalid file format or metadata structure"},
+        401: {"description": "Unauthorized - Invalid/Missing API Key"},
+        413: {"description": "Request entity too large - File size limit exceeded"},
+        500: {"description": "Internal server error during index creation"}
+})
+async def create_virtual_chatbot(
+    org_id: str = Path(..., description="Organization ID"),
+    prep: IndexPreparation = Depends(prepare_index)
+):
     try:
-        # First we need to authorize the organization id
-        # if not validate_organization_id(organization_id):
-        #     raise HTTPException(status_code=400, detail="Invalid organization ID.")
-
-        # Check metadata.json
-        metafile = next((file for file in files if file.filename == "metadata.json"), None)
-        if metafile is None:
-            raise HTTPException(status_code=400, detail="metadata.json is required")
-        
-        # Read meta file
-        metadata_content = await metafile.read()
-        metadata_content = json.loads(metadata_content.decode("utf-8"))
-
-        # Remove meta file
-        files = [f for f in files if f.filename != "metadata.json"]
-
-        # Separate file types
-        pdfFiles, docxFiles, txtFiles = [], [], []
-        pdfPrio, docxPrio, txtPrio = [], [], []
-
-        for file in files:
-            file_type = get_file_type(file)
-            if file_type == "pdf":
-                pdfFiles.append(file)
-                pdfPrio.append(metadata_content["files"].get(file.filename, 0))
-            elif file_type == "docx":
-                docxFiles.append(file)
-                docxPrio.append(metadata_content["files"].get(file.filename, 0))
-            elif file_type == "txt":
-                txtFiles.append(file)
-                txtPrio.append(metadata_content["files"].get(file.filename, 0))
-            else:
-                raise HTTPException(status_code=400, detail=f"Unsupported file: {file.filename}")
-
-        url_prio_list: List[Dict[str, Any]] = metadata_content.get("urls", [])
-        
-        result = await createIndexesFromFilesAndUrls(url_prio_list, pdfFiles, docxFiles, txtFiles, pdfPrio, docxPrio, txtPrio, organization_id=org_id, is_virtual=True)
-
+        result = await createIndexesFromFilesAndUrls(
+            prep.urls,
+            prep.pdf_files, prep.docx_files, prep.txt_files,
+            prep.pdf_prio, prep.docx_prio, prep.txt_prio,
+            organization_id=org_id,
+            is_virtual=True
+        )
         result.message = "Virtual Index created!"
-
         return result
 
     except HTTPException as http_exc:
@@ -178,27 +107,27 @@ async def create_virtual_chatbot(org_id: str = Path(..., description="Organizati
             detail=f"An unexpected error occurred: {str(e)}"
         )
     
-@v2_router.post("/save-virtual-chatbot/{org_id}", response_model=CreateNamespaceDto)
-def save_virtual_chatbot(org_id: str = Path(..., description="Organization ID"),
+
+@v2_router.post("/save-virtual-chatbot/{org_id}", response_model=CreateNamespaceDto, summary="Save the virtual chatbot", responses={
+        401: {"description": "Unauthorized - Invalid/Missing API Key"},
+        500: {"description": "Internal server error during saving virtual chatbot"}
+})
+async def save_virtual_chatbot(org_id: str = Path(..., description="Organization ID"),
 user_data: SaveNamespaceDto = Body(..., description="Current namespace of Organization")) -> Any:
     """
     Save the virtual chatbot by removing the previous index.
 
     **Parameters**:
-
-        Root:
-            - org_id: Organization ID (required)
-        Body:
-            - user_data: Current namespace of Organization
+    - **org_id**: *str* - Organization ID (required).
+    - **user_data**: *SaveNamespaceDto* - Current namespace of Organization
 
     **Returns**:
-        - The result of the operations (including new namespace for virtual bot!)
+    - The result of the operations (including new namespace for virtual bot!)
 
     **Raises**:
-        - HTTPException: If an error occurs during saving
+    - HTTPException: If an error occurs during saving
     """
     try:
-        
         result = saveVirtualIndex(old_namespace=user_data.current_namespace, organization_id=org_id)
         return result
 
@@ -211,8 +140,11 @@ user_data: SaveNamespaceDto = Body(..., description="Current namespace of Organi
             detail=f"An unexpected error occurred: {str(e)}"
         )
     
-@v2_router.delete("/dispose-virtual-chatbot/{org_id}", response_model=CreateNamespaceDto)
-def dispose_virtual_chatbot(org_id: str = Path(..., description="Organization ID"),
+@v2_router.delete("/dispose-virtual-chatbot/{org_id}", response_model=CreateNamespaceDto, summary="Delete the virtual chatbot", responses={
+        401: {"description": "Unauthorized - Invalid/Missing API Key"},
+        500: {"description": "Internal server error during disposing virtual chatbot"}
+})
+async def dispose_virtual_chatbot(org_id: str = Path(..., description="Organization ID"),
 user_data: SaveNamespaceDto = Body(..., description="Current namespace of Organization")) -> Any:
     """
     Remove the virtual chatbot index.
@@ -230,7 +162,6 @@ user_data: SaveNamespaceDto = Body(..., description="Current namespace of Organi
     - **HTTPException**: If an error occurs during the disposal process.
     """
     try:
-        
         result = disposeVirtualIndex(old_namespace=user_data.current_namespace, organization_id=org_id)
         return result
 
@@ -242,6 +173,7 @@ user_data: SaveNamespaceDto = Body(..., description="Current namespace of Organi
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An unexpected error occurred: {str(e)}"
         )
+
 
 @v2_router.put("/new-chat", response_model=Any)
 async def create_new_chat() -> Any:
@@ -281,7 +213,7 @@ async def read_items(id: str = Path(..., description="Chat ID")) -> Any:
 @v2_router.post("/{id}", response_model=Any)
 async def create_reply_message(
     id: str = Path(..., description="Chat ID"),
-    user_data: ChatUserDtoV2 = Body(..., description="User's Input Query and Chat history")
+    user_data: ChatUserDto = Body(..., description="User's Input Query and Chat history")
 ) -> Any:
     """
     Get Reply message from the LLM.
@@ -306,7 +238,7 @@ async def create_reply_message(
     """
     try:
         return StreamingResponse(
-            response_from_LLM(
+            stream_response(
                 session_id=id,
                 query=user_data.new_message,
                 db_host=user_data.index_host,
@@ -333,7 +265,7 @@ async def create_reply_message(
 @v2_router.post("/compare/{org_id}", response_model=Any)
 async def create_parallel_reply_message(
     org_id: str = Path(..., description="Organization ID"),
-    user_data: ChatUserDtoV2 = Body(..., description="User's Input Query and Chat history")
+    user_data: ChatUserDto = Body(..., description="User's Input Query and Chat history")
 ) -> Any:
     """
     Get two reply messages from the LLM.

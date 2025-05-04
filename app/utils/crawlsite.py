@@ -1,3 +1,68 @@
+from typing import List, Dict
+from langchain_core.documents import Document
+from tqdm.asyncio import tqdm_asyncio
+from app.core.config import settings
+import asyncio
+from langchain_community.document_loaders.firecrawl import FireCrawlLoader
+from tqdm.asyncio import tqdm_asyncio
+from langchain_core.documents import Document
+
+async def load_site(url: str, priority: int, api_key: str) -> List[Document]:
+    loader = FireCrawlLoader(api_key=api_key, url=url, mode="scrape")
+
+    try:
+        documents = await asyncio.to_thread(loader.load)
+        for doc in documents:
+            doc.metadata["priority"] = priority
+            doc.metadata["source"] = url
+        return documents
+    except Exception as e:
+        print(f"Error while scraping {url}: {e}")
+        return []
+
+async def crawl_sites(websites_data: List[Dict]) -> List[Document]:
+    tasks = [load_site(web["url"], web["priority"], settings.FIRECRAWL_API_KEY) for web in websites_data]
+    results = await tqdm_asyncio.gather(*tasks, desc="Collecting web info...", unit="site")
+    all_documents = [doc for res in results for doc in res if res is not None]
+    return all_documents
+
+
+# if __name__ == "__main__":
+#     # For testing, try a few different websites including some JS-heavy ones
+#     test_sites = [
+#         {"url": "https://itviec.com/blog/faq-chuc-nang-loi-moi-cong-viec-danh-cho-ung-vien/", "priority": 1},
+#         {"url": "https://itviec.com/blog/faq-ve-chuc-nang-company-review/", "priority": 1},  # React docs
+#         # {"url": "https://vuejs.org/guide/introduction.html", "priority": 1},  # Vue docs
+#         # {"url": "https://angular.io/guide/what-is-angular", "priority": 1},  # Angular docs
+#     ]
+    
+#     documents = asyncio.run(crawl_sites(test_sites))
+    
+#     print("\n=== Crawl Results ===")
+#     for i, doc in enumerate(documents):
+#         print(f"\nDocument {i+1}:")
+#         print(f"Source: {doc.metadata['source']}")
+#         print(f"Title: {doc.metadata.get('title', 'No title')}")
+#         print(f"Content Length: {len(doc.page_content)} characters")
+#         print(f"Content Preview: {doc.page_content}...")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # from typing import List, Dict, Any, Set
 # import asyncio
 # from langchain_core.documents import Document
@@ -315,65 +380,3 @@
 #         print(f"Title: {doc.metadata.get('title', 'No title')}")
 #         print(f"Content Length: {len(doc.page_content)} characters")
 #         print(f"Content Preview: {doc.page_content}...")
-
-from bs4 import BeautifulSoup
-import httpx
-from typing import Any, Dict, List
-from langchain_core.documents import Document
-from tqdm.asyncio import tqdm_asyncio
-import os
-# import firecrawl
-from firecrawl import FirecrawlApp
-
-# from app.core.config import settings
-# Initialize Firecrawl client
-# firecrawl_client = firecrawl.Client(api_key=os.getenv("FIRECRAWL_API_KEY"))
-
-import asyncio
-from langchain_community.document_loaders.firecrawl import FireCrawlLoader
-from tqdm.asyncio import tqdm_asyncio
-from langchain_core.documents import Document
-
-# from app.core.config import settings
-
-async def load_site(url: str, priority: int, api_key: str) -> list[Document]:
-    # loader = FireCrawlLoader(api_key=settings.FIRECRAWL_API_KEY, url=url, mode="scrape")
-    loader = FireCrawlLoader(api_key=api_key, url=url, mode="scrape")
-
-    try:
-        documents = await asyncio.to_thread(loader.load)
-        for doc in documents:
-            doc.metadata["priority"] = priority
-            doc.metadata["source"] = url
-        return documents
-    except Exception as e:
-        print(f"Lỗi khi tải {url}: {e}")
-        return []
-
-async def crawl_sites(websites_data: list[dict]) -> list[Document]:
-    # tasks = [load_site(web["url"], web["priority"], settings.FIRECRAWL_API_KEY) for web in websites_data]
-    tasks = [load_site(web["url"], web["priority"], 'fc-712957210c564e789bdf65ca35f91749') for web in websites_data]
-    results = await tqdm_asyncio.gather(*tasks, desc="Collecting web info...", unit="site")
-    all_documents = [doc for res in results for doc in res if res is not None]
-    return all_documents
-
-
-# if __name__ == "__main__":
-#     # For testing, try a few different websites including some JS-heavy ones
-#     test_sites = [
-#         {"url": "https://itviec.com/blog/faq-chuc-nang-loi-moi-cong-viec-danh-cho-ung-vien/", "priority": 1},
-#         {"url": "https://itviec.com/blog/faq-ve-chuc-nang-company-review/", "priority": 1},  # React docs
-#         # {"url": "https://vuejs.org/guide/introduction.html", "priority": 1},  # Vue docs
-#         # {"url": "https://angular.io/guide/what-is-angular", "priority": 1},  # Angular docs
-#     ]
-    
-#     documents = asyncio.run(crawl_sites(test_sites))
-    
-#     print("\n=== Crawl Results ===")
-#     for i, doc in enumerate(documents):
-#         print(f"\nDocument {i+1}:")
-#         print(f"Source: {doc.metadata['source']}")
-#         print(f"Title: {doc.metadata.get('title', 'No title')}")
-#         print(f"Content Length: {len(doc.page_content)} characters")
-#         print(f"Content Preview: {doc.page_content}...")
-
