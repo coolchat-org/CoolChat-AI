@@ -1,22 +1,20 @@
+import asyncio
 import hashlib
 import logging
 import os
 import tempfile
-import shutil
-import subprocess
-import time
 from typing import Any, Dict, List, Tuple
 from uuid import uuid4
 from charset_normalizer import detect
 from fastapi import HTTPException, UploadFile, logger, status
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
-from langchain_core.document_loaders.base import BaseLoader
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, GoogleGenerativeAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
-from app.dtos.chatUserDto import CreateIndexDto
+from app.dtos.indexDto import CreateNamespaceDto
 from app.utils.crawlsite import crawl_sites
 from app.core.config import settings
 from pinecone import Pinecone, ServerlessSpec
@@ -24,61 +22,11 @@ from langchain_pinecone import PineconeVectorStore
 from PyPDF2 import PdfReader
 from docx import Document as DocxDocument
 from fastapi import UploadFile
-import os
-import tempfile
-import shutil
-import subprocess
+
 
 # Thiết lập logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-async def convert_doc_to_docx(doc_file: UploadFile) -> str:
-    """
-    Convert a .doc file to .docx format.
-    
-    Args:
-        doc_file (UploadFile): The uploaded .doc file.
-        
-    Returns:
-        str: Path to the converted .docx file.
-    """
-    try:
-        # Save the uploaded .doc file to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".doc") as temp_doc:
-            content = await doc_file.read()
-            temp_doc.write(content)
-            temp_doc_path = temp_doc.name
-
-        # Create output path for the .docx file
-        docx_file = tempfile.mktemp(suffix=".docx")
-
-        # Use LibreOffice to convert the file
-        command = [
-            "soffice",
-            "--headless",
-            "--convert-to",
-            "docx",
-            "--outdir",
-            os.path.dirname(docx_file),
-            temp_doc_path,
-        ]
-        process = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        
-        if process.returncode != 0:
-            raise RuntimeError(f"LibreOffice conversion failed: {process.stderr.decode()}")
-
-        # Ensure the output file exists
-        converted_file_path = temp_doc_path.replace(".doc", ".docx")
-        if not os.path.exists(converted_file_path):
-            raise FileNotFoundError(f"Converted file not found: {converted_file_path}")
-        
-        shutil.move(converted_file_path, docx_file)  # Move to final path
-        return docx_file
-
-    except Exception as e:
-        raise RuntimeError(f"Error converting file: {e}")
-
 
 
 def detect_file_encoding(file: UploadFile) -> str:
@@ -101,33 +49,25 @@ async def process_file(file: UploadFile, priority: int) -> List[Document]:
         elif file.content_type in ["text/plain; charset=utf-8", "text/plain"]:
             loader_cls = TextLoader
 
-        if file.filename.endswith(".doc") and loader_cls == Docx2txtLoader:
-            # Convert .doc to .docx
-            print(f"Converting .doc to .docx for {file}...")
-            docx_file = await convert_doc_to_docx(file)
-            loader = loader_cls(docx_file)
-            documents = loader.load()
-            os.remove(docx_file)  # Clean up temporary file
+        # Save the file temporarily for processing
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file.filename.split('.')[-1]) as temp_file:
+            temp_file.write(await file.read())
+            temp_file_path = temp_file.name
+
+        # Load the file using the specified loader
+        if loader_cls == TextLoader:
+            encoding = detect_file_encoding(temp_file_path)  # Ensure this function takes a file path
+            loader = loader_cls(temp_file_path, encoding=encoding)
         else:
-            # Save the file temporarily for processing
-            with tempfile.NamedTemporaryFile(delete=False, suffix=file.filename.split('.')[-1]) as temp_file:
-                temp_file.write(await file.read())
-                temp_file_path = temp_file.name
+            loader = loader_cls(temp_file_path)
+        documents = loader.load()
+        for doc in documents:
+            if not doc.metadata:
+                doc.metadata = {}
+            doc.metadata["priority"] = priority
 
-            # Load the file using the specified loader
-            if loader_cls == TextLoader:
-                encoding = detect_file_encoding(temp_file_path)  # Ensure this function takes a file path
-                loader = loader_cls(temp_file_path, encoding=encoding)
-            else:
-                loader = loader_cls(temp_file_path)
-            documents = loader.load()
-            for doc in documents:
-                if not doc.metadata:
-                    doc.metadata = {}
-                doc.metadata["priority"] = priority
-
-            # Clean up temporary file
-            os.remove(temp_file_path)
+        # Clean up temporary file
+        os.remove(temp_file_path)
 
         return documents
     
@@ -161,12 +101,12 @@ def set_batch_and_splitter(length: int) -> Tuple[int, RecursiveCharacterTextSpli
     """
     batch_size = 10
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000, chunk_overlap=50,
+        chunk_size=800, chunk_overlap=100,
         length_function=len, is_separator_regex=False)
     if length > 1000:
         batch_size = 50
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=4000,          # Tăng chunk_size để giảm số lượng đoạn
+            chunk_size=3000,          # Tăng chunk_size để giảm số lượng đoạn
             chunk_overlap=300,        # Tăng chunk_overlap nếu cần ngữ cảnh rộng hơn
             length_function=len,
             is_separator_regex=False
@@ -174,15 +114,15 @@ def set_batch_and_splitter(length: int) -> Tuple[int, RecursiveCharacterTextSpli
     elif length > 500:
         batch_size = 20
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=2000,          # Increase chunk_size => decrease num of paragraph
-            chunk_overlap=100,        # Increase chunk_overlap for larger context
+            chunk_size=1500,          # Increase chunk_size => decrease num of paragraph
+            chunk_overlap=200,        # Increase chunk_overlap for larger context
             length_function=len,
             is_separator_regex=False
         )
 
     return batch_size, text_splitter
 
-def generate_index_name(organization_id: str, prefix: str = "org-index") -> str:
+def generate_org_name(organization_id: str, prefix: str) -> str:
     """
     Generate a unique Pinecone index name using SHA-256 hash of the organization_id.
 
@@ -207,43 +147,50 @@ async def createIndexesFromFilesAndUrls(websites_data: List[Dict[str, Any]],
     pdfFiles: List[UploadFile] = None, docxFiles: List[UploadFile] = None, txtFiles: List[UploadFile] = None, pdfPrio: List[int] = [], docxPrio: List[int] = [], txtPrio: List[int] = [], 
     organization_id: str = "12345xoz", is_virtual: bool = False):
     try:
-        # --- Check index exists
-        if len(pdfFiles) == 0 and len(docxFiles) == 0 and len(txtFiles) == 0 and len(websites_data) == 0:
-            raise ValueError("No valid files (PDF, Word, or TXT) or websites found.")
-        else:
-            print("Found pdf files: ", len(pdfFiles))
-            print("Found doc files: ", len(docxFiles))
-            print("Found txt files: ", len(txtFiles))
-            print("Found sites: ", len(websites_data))
-    
+        # --- Check valid data
+        if not any([pdfFiles, docxFiles, txtFiles, websites_data]):
+            raise ValueError("No valid files (PDF, Word, or TXT) or websites provided.")
+        
+        # --- Check shared index exists
+        shared_index_name = settings.INDEX_NAME
         pc = Pinecone(api_key=settings.PINECONE_API_KEY)
-        # if organization_id.endswith("_0"):
-        #     organization_id = organization_id[:-2]
-        index_name = generate_index_name(organization_id=organization_id)
-
         existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
-        if index_name in existing_indexes:
-            # directly create
-            if not is_virtual:
-                # do not raise exception, delete it
-                pc.delete_index(name=index_name, timeout=10)
-            else:
-                index_name = index_name + "-0"
+        if shared_index_name not in existing_indexes:
+            pc.create_index(
+                name=shared_index_name,
+                dimension=1536,
+                metric="cosine",
+                spec=ServerlessSpec(cloud="aws", region="us-east-1"),
+            )
+            print(f"Creating shared index: {shared_index_name}")
+            while not pc.describe_index(shared_index_name).status["ready"]:
+                await asyncio.sleep(1)
+        else:
+            print(f"Shared index '{shared_index_name}' existed.")
 
-        elif index_name + "-0" in existing_indexes:
+        # --- Handle org namespace
+        org_namespace = generate_org_name(organization_id, prefix=shared_index_name)    
+
+        index = pc.Index(shared_index_name)
+        index_stats = index.describe_index_stats()
+        existing_namespaces = list(index_stats.get("namespaces", {}).keys())
+        # print("List namespace: ", existing_namespaces)
+        if org_namespace in existing_namespaces:
+            if not is_virtual:
+                index.delete(delete_all=True, namespace=org_namespace)
+            else:
+                org_namespace = org_namespace + "-0"
+        elif org_namespace + "-0" in existing_indexes:
             if not is_virtual:
                 # do not raise exception, delete it
-                pc.delete_index(name=index_name + "-0", timeout=10)
+                index.delete(delete_all=True, namespace=org_namespace + "-0")
         
-        
+        # --- Main code: load and index file
         normalDocs: List[Document] = await load_files_by_type(
             files=pdfFiles + docxFiles + txtFiles,
             priorities=pdfPrio + docxPrio + txtPrio
         )
         webDocs: List[Document] = await crawl_sites(websites_data=websites_data)
-
-        # allDocs: List[Document] = normalDocs + webDocs
-        # allDocs = [extract_metadata(doc) for doc in (normalDocs + webDocs)]
         allDocs: List[Document] = normalDocs + webDocs
 
         print(f'Total documents loaded: {len(allDocs)}')
@@ -253,29 +200,22 @@ async def createIndexesFromFilesAndUrls(websites_data: List[Dict[str, Any]],
             model="text-embedding-3-small",
             api_key=settings.OPENAI_API_KEY
         )
-        
-        pc.create_index(
-            name=index_name,
-            dimension=1536,
-            metric="cosine",
-            spec=ServerlessSpec(cloud="aws", region="us-east-1"),
-        )
-        while not pc.describe_index(index_name).status["ready"]:
-            time.sleep(1)
+        # embedder = GoogleGenerativeAIEmbeddings(
+        #     model_name="gemini-embedding-exp-03-07", task_type="RETRIEVAL_DOCUMENT", 
+        # )
 
-        index = pc.Index(index_name)
         print("Processing and indexing documents...")
         vector_store = PineconeVectorStore(index=index, embedding=embedder)
         for i in tqdm(range(0, len(allDocs), batch_size), desc="Processing batches", unit="batch"):
             batch = allDocs[i:i + batch_size]
             batch_splits = text_splitter.split_documents(batch)
-            await vector_store.aadd_documents(batch_splits) 
+            await vector_store.aadd_documents(batch_splits, namespace=org_namespace) 
         
-        index_url = pc.describe_index(index_name)["host"]
+        index_url = pc.describe_index(shared_index_name)["host"]
 
-        return CreateIndexDto(
+        return CreateNamespaceDto(
             message="Index creation completed successfully.",
-            index_name=index_name,
+            namespace=org_namespace,
             index_url=index_url,
         )
 
@@ -291,32 +231,39 @@ async def createIndexesFromFilesAndUrls(websites_data: List[Dict[str, Any]],
         )
 
 
-def saveVirtualIndex(old_index_name: str, organization_id: str = "12345xoz"):
+def saveVirtualIndex(old_namespace: str, organization_id: str = "12345xoz"):
     try:
         # --- Check index exists
+        shared_index_name = settings.INDEX_NAME
         pc = Pinecone(api_key=settings.PINECONE_API_KEY)
-        index_name_1 = generate_index_name(organization_id=organization_id)
-        index_name_2 = index_name_1 + "-0"
-        if old_index_name != index_name_1 and old_index_name != index_name_2:
+        index = pc.Index(shared_index_name)
+        
+        # --- Check namespace exists
+        namespace_1 = generate_org_name(organization_id=organization_id, prefix=shared_index_name)
+        namespace_2 = namespace_1 + "-0"
+        if old_namespace != namespace_1 and old_namespace != namespace_2:
             raise Exception(f"Bad organization id entered!")
+
         
-        if old_index_name.endswith("-0"):
-            index_to_save = index_name_1
+        if old_namespace.endswith("-0"):
+            namespace_to_save = namespace_1
         else:
-            index_to_save = index_name_2
+            namespace_to_save = namespace_2
 
-        existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
-        if old_index_name not in existing_indexes:
-            raise Exception(f"Index '{old_index_name}' did not exists.")
-        elif index_to_save not in existing_indexes:
-            raise Exception(f"Index '{index_to_save}' did not exists.")
+        index_stats = index.describe_index_stats()
+        existing_namespaces = list(index_stats.get("namespaces", {}).keys())
+        print("List namespace: ", existing_namespaces)
+        if old_namespace not in existing_namespaces:
+            raise Exception(f"Namespace to delete: '{old_namespace}' did not exists.")
+        elif namespace_to_save not in existing_namespaces:
+            raise Exception(f"Namespace to save: '{namespace_to_save}' did not exists.")
         
-        pc.delete_index(name=old_index_name, timeout=10)        
-        index_url = pc.describe_index(index_to_save)["host"]
+        index.delete(delete_all=True, namespace=old_namespace)     
+        index_url = pc.describe_index(shared_index_name)["host"]
 
-        return CreateIndexDto(
-            message="Virtual Index saving completed successfully.",
-            index_name=index_to_save,
+        return CreateNamespaceDto(
+            message="Virtual namespace saving completed successfully.",
+            namespace=namespace_to_save,
             index_url=index_url,
         )
 
@@ -331,31 +278,37 @@ def saveVirtualIndex(old_index_name: str, organization_id: str = "12345xoz"):
             detail=f"An unexpected error occurred: {str(e)}"
         )
 
-def disposeVirtualIndex(old_index_name: str, organization_id: str = "12345xoz"):
+def disposeVirtualIndex(old_namespace: str, organization_id: str = "12345xoz"):
     try:
         # --- Check index exists
+        shared_index_name = settings.INDEX_NAME
         pc = Pinecone(api_key=settings.PINECONE_API_KEY)
-        index_name_1 = generate_index_name(organization_id=organization_id)
-        index_name_2 = index_name_1 + "-0"
-        if old_index_name != index_name_1 and old_index_name != index_name_2:
+        index = pc.Index(shared_index_name)
+        
+        # --- Check namespace exists
+        namespace_1 = generate_org_name(organization_id=organization_id, prefix=shared_index_name)
+        namespace_2 = namespace_1 + "-0"
+        if old_namespace != namespace_1 and old_namespace != namespace_2:
             raise Exception(f"Bad organization id entered!")
         
-        if old_index_name.endswith("-0"):
-            index_to_delete = index_name_1
+        if old_namespace.endswith("-0"):
+            namespace_to_delete = namespace_1
         else:
-            index_to_delete = index_name_2
+            namespace_to_delete = namespace_2
 
-        existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
-        if old_index_name not in existing_indexes:
-            raise Exception(f"Index '{old_index_name}' did not exists.")
-        elif index_to_delete not in existing_indexes:
-            raise Exception(f"Index '{index_to_delete}' did not exists.")
+        index_stats = index.describe_index_stats()
+        existing_namespaces = list(index_stats.get("namespaces", {}).keys())
+        print("List namespace: ", existing_namespaces)
+        if old_namespace not in existing_namespaces:
+            raise Exception(f"Old namespace: '{old_namespace}' did not exists.")
+        elif namespace_to_delete not in existing_namespaces:
+            raise Exception(f"Namespace to delete '{namespace_to_delete}' did not exists.")
         
-        pc.delete_index(name=index_to_delete, timeout=10)        
+        index.delete(delete_all=True, namespace=namespace_to_delete)         
 
-        return CreateIndexDto(
-            message="Virtual Index deleting completed successfully.",
-            index_name="",
+        return CreateNamespaceDto(
+            message="Virtual namespace deleting completed successfully.",
+            namespace="",
             index_url="",
         )
 

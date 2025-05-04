@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     # HTTP_PROXY: str
     AI_SERVICE_API_KEY: str
     FIRECRAWL_API_KEY: str
+    GOOGLE_AI_API_KEY: str
 
 
 # Khởi tạo settings
