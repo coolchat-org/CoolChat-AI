@@ -11,8 +11,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from app.core.config import settings
 from app.core.connections import PineconeConnectionPool
 from app.models.chatModel import ChatModel
-# from app.models.ranker import CoolChatVectorStore
-from app.models.ranker_new import CoolChatVectorStore
+from app.models.rankest import CoolChatVectorStore
 from langchain_core.messages import HumanMessage, AIMessage
 from app.utils.summarizer import tokenize_and_summarize_openai
 from cachetools import TTLCache, cached

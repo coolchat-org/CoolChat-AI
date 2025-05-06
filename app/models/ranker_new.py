@@ -1,3 +1,5 @@
+import hashlib
+import json
 from typing import Any, ClassVar, Dict, List, Tuple, Optional, Set, override
 from langchain_pinecone import PineconeVectorStore
 from langchain_core.retrievers import BaseRetriever
@@ -127,6 +129,37 @@ class CoolChatVectorStore(PineconeVectorStore):
         sorted_docs = [doc for doc, _ in sorted(weighted_scores, key=lambda x: x[1], reverse=True)]
         
         return self._deduplicate_docs(sorted_docs)
+
+    async def _keyword_search(
+        self, 
+        query: str,
+        k: int = 3
+    ) -> List[SearchResult]:
+        """Perform keyword-based search using TF-IDF"""
+        if not self.doc_texts:
+            return []
+            
+        # Preprocess query
+        processed_query = self._preprocess_text(query)
+        query_vector = self.tfidf.transform([processed_query])
+        
+        # Calculate similarities
+        similarities = (query_vector @ self.tfidf_matrix.T).toarray()[0]
+        
+        # Get top-k results
+        top_indices = np.argsort(similarities)[-k:][::-1]
+        
+        results = []
+        for idx in top_indices:
+            if similarities[idx] > 0:
+                doc = self.doc_mapping[idx]
+                results.append(SearchResult(
+                    document=doc,
+                    vector_score=0.0,
+                    keyword_score=float(similarities[idx])
+                ))
+        
+        return results
 
     # @override
     async def acoolchat_similarity_search_original(
@@ -398,6 +431,7 @@ class CoolChatVectorStore(PineconeVectorStore):
         """
         return CoolChatRetriever(vectorstore=self, search_kwargs=search_kwargs)
 
+    
 class CoolChatRetriever(BaseRetriever):
     """Optimized retriever with caching and batch processing"""
     
