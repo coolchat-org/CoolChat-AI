@@ -1,0 +1,13 @@
+[
+    {
+      "name": "rephrase_en",
+      "input_variables": ["chat_history", "input"],
+      "template": "Given the following conversation and a follow-up question, rephrase the follow-up question to be a standalone question.\n\nChat History:\n{{chat_history}}\n\nFollow-Up Input: {{input}}\n\nStandalone Question:"
+    },
+    {
+      "name": "rephrase_vi",
+      "input_variables": ["chat_history", "input"],
+      "template": "Cho lịch sử hội thoại và một câu hỏi bổ sung, hãy viết lại câu hỏi đó thành một câu hỏi độc lập.\n\nLịch sử hội thoại:\n{{chat_history}}\n\nCâu hỏi bổ sung: {{input}}\n\nCâu hỏi độc lập:"
+    }
+  ]
+  

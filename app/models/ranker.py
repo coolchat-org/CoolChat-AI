@@ -76,20 +76,6 @@ class CoolChatVectorStore(PineconeVectorStore):
         # Shortener version!
         sorted_results = [elem[1][0] for elem in sorted_results]
         sorted_results = sorted_results[:2]
-        print("Contexts: ")
-        print(sorted_results)
-        # Detail version
-        # sorted_results = [elem[1] for elem in sorted_results]
-        # print("3 document before: \n")
-        # for i in range(3):
-        #     print(f"Document {i}, ranking: {sorted_results[i][1]} \nPage content: {sorted_results[i][0].page_content}")
-        # sorted_results = sorted_results[:2]
-        # print("2 document after ranking: ")
-        # for i in range(2):
-        #     print(f"Document {i}, ranking: {sorted_results[i][1]}")
-
-        # sorted_results = [elem[0] for elem in sorted_results]
-
         # Delete duplication by "id"
         unique_docs = {doc.metadata.get("id", id(doc)): doc for doc in sorted_results}.values()
         return list(unique_docs)
